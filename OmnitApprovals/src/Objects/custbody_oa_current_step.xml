@@ -3,14 +3,5 @@
   <label>Approval Step</label>
   <fieldtype>INTEGER</fieldtype>
   <ismandatory>F</ismandatory>
-  <displaytype>DISABLED</displaytype>
-  <appliestopurchaseorder>T</appliestopurchaseorder>
-  <appliestovendorbill>T</appliestovendorbill>
-  <appliestosalesorder>F</appliestosalesorder>
-  <appliestoinvoice>F</appliestoinvoice>
-  <appliestocreditnote>F</appliestocreditnote>
-  <appliestoexpensereport>F</appliestoexpensereport>
-  <appliestojournalentry>F</appliestojournalentry>
-  <appliestopayment>F</appliestopayment>
-  <appliestoreturnauthorization>F</appliestoreturnauthorization>
+  <displaytype>INLINE</displaytype>
 </transactionbodycustomfield>
