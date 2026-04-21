@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entitycustomfield scriptid="custentity_oa_delegate_to">
+  <label>Delegate To</label>
+  <fieldtype>SELECT</fieldtype>
+  <selectrecordtype>-4</selectrecordtype>
+  <appliestoemployee>T</appliestoemployee>
+  <appliestoperson>F</appliestoperson>
+  <appliestocontact>F</appliestocontact>
+  <appliestocustomer>F</appliestocustomer>
+  <appliestopartner>F</appliestopartner>
+  <appliestovendor>F</appliestovendor>
+  <ismandatory>F</ismandatory>
+</entitycustomfield>
