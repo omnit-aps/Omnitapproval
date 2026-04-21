@@ -5,26 +5,13 @@
   <allowattachments>F</allowattachments>
   <allowinlineediting>F</allowinlineediting>
   <allowquickadd>F</allowquickadd>
-  <allowuioverride>F</allowuioverride>
-  <enablemailmerge>F</enablemailmerge>
-  <enablenotes>T</enablenotes>
   <isordered>F</isordered>
-  <links />
-  <permissions>
-    <permission>
-      <permittedrole>-1</permittedrole>
-      <permissionlevel>VIEW</permissionlevel>
-    </permission>
-  </permissions>
   <customrecordcustomfields>
     <customrecordcustomfield scriptid="custrecord_oa_subsidiary">
       <label>Subsidiary</label>
       <fieldtype>SELECT</fieldtype>
       <selectrecordtype>-117</selectrecordtype>
       <ismandatory>T</ismandatory>
-      <isparent>F</isparent>
-      <displaytype>NORMAL</displaytype>
-      <isglobalSearch>F</isglobalSearch>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_enable_po">
       <label>Enable PO Approval</label>
