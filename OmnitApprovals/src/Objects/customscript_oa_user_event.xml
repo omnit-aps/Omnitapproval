@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<usereventscript scriptid="customscript_oa_user_event">
+  <name>OA - Approval User Event</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_user_event.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_ue_po">
+      <status>TESTING</status>
+      <recordtype>PURCHASEORDER</recordtype>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+    <scriptdeployment scriptid="customdeploy_oa_ue_vb">
+      <status>TESTING</status>
+      <recordtype>VENDORBILL</recordtype>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+  </scriptdeployments>
+</usereventscript>
