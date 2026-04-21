@@ -7,13 +7,12 @@
   <notifyowner>T</notifyowner>
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_sl_settings">
+      <title>OA - Settings</title>
       <status>RELEASED</status>
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
       <allemployees>F</allemployees>
-      <allpartners>F</allpartners>
       <allroles>F</allroles>
-      <isaccessible>F</isaccessible>
     </scriptdeployment>
   </scriptdeployments>
 </suitelet>
