@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customrecordtype scriptid="customrecord_oa_hierarchy">
+  <recordname>OA - Approval Hierarchy</recordname>
+  <isinactive>F</isinactive>
+  <allowattachments>F</allowattachments>
+  <allowinlineediting>F</allowinlineediting>
+  <allowquickadd>T</allowquickadd>
+  <allowuioverride>F</allowuioverride>
+  <enablenotes>T</enablenotes>
+  <isordered>F</isordered>
+  <links />
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_oah_settings">
+      <label>Parent Settings</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>customrecord_oa_settings</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <isparent>T</isparent>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_name">
+      <label>Hierarchy Name</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>T</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_record_type">
+      <label>Record Type</label>
+      <fieldtype>SELECT</fieldtype>
+      <ismandatory>T</ismandatory>
+      <customfieldfilters />
+      <selectrecordtype>-100</selectrecordtype>
+      <custrecordcustomfieldselectionvalues>
+        <selectionvalue>
+          <valueid>1</valueid>
+          <valuetext>Purchase Order</valuetext>
+        </selectionvalue>
+        <selectionvalue>
+          <valueid>2</valueid>
+          <valuetext>Vendor Bill</valuetext>
+        </selectionvalue>
+        <selectionvalue>
+          <valueid>3</valueid>
+          <valuetext>Begge</valuetext>
+        </selectionvalue>
+      </custrecordcustomfieldselectionvalues>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_currency">
+      <label>Currency</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-160</selectrecordtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_status">
+      <label>Status</label>
+      <fieldtype>SELECT</fieldtype>
+      <ismandatory>T</ismandatory>
+      <defaultvalue>1</defaultvalue>
+      <custrecordcustomfieldselectionvalues>
+        <selectionvalue>
+          <valueid>1</valueid>
+          <valuetext>Draft</valuetext>
+        </selectionvalue>
+        <selectionvalue>
+          <valueid>2</valueid>
+          <valuetext>Active</valuetext>
+        </selectionvalue>
+        <selectionvalue>
+          <valueid>3</valueid>
+          <valuetext>Expired</valuetext>
+        </selectionvalue>
+      </custrecordcustomfieldselectionvalues>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_start_date">
+      <label>Start Date</label>
+      <fieldtype>DATE</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_end_date">
+      <label>End Date</label>
+      <fieldtype>DATE</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_highest_only">
+      <label>Only Highest Approver Required</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>
