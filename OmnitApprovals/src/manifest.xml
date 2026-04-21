@@ -5,7 +5,9 @@
   <dependencies>
     <features>
       <feature required="true">SUBSIDIARIES</feature>
-      <feature required="true">APPROVALS</feature>
+      <feature required="true">SERVERSIDESCRIPTING</feature>
+      <feature required="false">ACCOUNTING</feature>
+      <feature required="false">CRM</feature>
     </features>
   </dependencies>
 </manifest>
