@@ -7,14 +7,12 @@
   <notifyowner>T</notifyowner>
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_sl_email_action">
+      <title>OA - Email Action</title>
       <status>RELEASED</status>
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
       <allemployees>T</allemployees>
-      <allpartners>F</allpartners>
       <allroles>F</allroles>
-      <!-- Available Without Login = true for email links -->
-      <isaccessible>T</isaccessible>
     </scriptdeployment>
   </scriptdeployments>
 </suitelet>
