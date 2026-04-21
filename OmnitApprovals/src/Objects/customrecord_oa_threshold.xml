@@ -5,17 +5,12 @@
   <allowattachments>F</allowattachments>
   <allowinlineediting>T</allowinlineediting>
   <allowquickadd>T</allowquickadd>
-  <allowuioverride>F</allowuioverride>
-  <enablenotes>F</enablenotes>
   <isordered>T</isordered>
-  <links />
   <customrecordcustomfields>
     <customrecordcustomfield scriptid="custrecord_oat_hierarchy">
-      <label>Parent Hierarchy</label>
-      <fieldtype>SELECT</fieldtype>
-      <selectrecordtype>customrecord_oa_hierarchy</selectrecordtype>
+      <label>Parent Hierarchy ID</label>
+      <fieldtype>INTEGER</fieldtype>
       <ismandatory>T</ismandatory>
-      <isparent>T</isparent>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oat_label">
       <label>Column Label</label>
