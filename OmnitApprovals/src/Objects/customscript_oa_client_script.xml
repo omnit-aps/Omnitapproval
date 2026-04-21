@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<clientscript scriptid="customscript_oa_client_script">
+  <name>OA - Approval Client Script</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_client_script.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_cs_po">
+      <status>TESTING</status>
+      <recordtype>PURCHASEORDER</recordtype>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+    <scriptdeployment scriptid="customdeploy_oa_cs_vb">
+      <status>TESTING</status>
+      <recordtype>VENDORBILL</recordtype>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+  </scriptdeployments>
+</clientscript>
