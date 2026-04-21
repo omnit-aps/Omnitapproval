@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customrecordtype scriptid="customrecord_oa_settings">
+  <recordname>OA - Approval Settings</recordname>
+  <isinactive>F</isinactive>
+  <allowattachments>F</allowattachments>
+  <allowinlineediting>F</allowinlineediting>
+  <allowquickadd>F</allowquickadd>
+  <allowuioverride>F</allowuioverride>
+  <enablemailmerge>F</enablemailmerge>
+  <enablenotes>T</enablenotes>
+  <isordered>F</isordered>
+  <links />
+  <permissions>
+    <permission>
+      <permittedrole>-1</permittedrole>
+      <permissionlevel>VIEW</permissionlevel>
+    </permission>
+  </permissions>
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_oa_subsidiary">
+      <label>Subsidiary</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-117</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <isparent>F</isparent>
+      <displaytype>NORMAL</displaytype>
+      <isglobalSearch>F</isglobalSearch>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_enable_po">
+      <label>Enable PO Approval</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_enable_vb">
+      <label>Enable VB Approval</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_approver_count">
+      <label>Number of Approvers</label>
+      <fieldtype>INTEGER</fieldtype>
+      <ismandatory>T</ismandatory>
+      <defaultvalue>1</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_use_amount">
+      <label>Use Amount Thresholds</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_default_approver1">
+      <label>Default Approver 1</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>T</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_default_approver2">
+      <label>Default Approver 2</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_approve_string">
+      <label>Approve Button Label</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>Godkend</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_reject_string">
+      <label>Reject Button Label</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>Afvis</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_email_enabled">
+      <label>Enable Email Approval</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_token_expiry_days">
+      <label>Token Expiry (days)</label>
+      <fieldtype>INTEGER</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>7</defaultvalue>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>
