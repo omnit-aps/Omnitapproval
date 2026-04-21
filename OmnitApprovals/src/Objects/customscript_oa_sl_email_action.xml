@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suitelet scriptid="customscript_oa_sl_email_action">
+  <name>OA - Email Action Suitelet</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_sl_email_action.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_sl_email_action">
+      <status>RELEASED</status>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+      <!-- Available Without Login = true for email links -->
+      <isaccessible>T</isaccessible>
+    </scriptdeployment>
+  </scriptdeployments>
+</suitelet>
