@@ -5,17 +5,12 @@
   <allowattachments>F</allowattachments>
   <allowinlineediting>F</allowinlineediting>
   <allowquickadd>T</allowquickadd>
-  <allowuioverride>F</allowuioverride>
-  <enablenotes>T</enablenotes>
   <isordered>F</isordered>
-  <links />
   <customrecordcustomfields>
     <customrecordcustomfield scriptid="custrecord_oah_settings">
-      <label>Parent Settings</label>
-      <fieldtype>SELECT</fieldtype>
-      <selectrecordtype>customrecord_oa_settings</selectrecordtype>
+      <label>Parent Settings ID</label>
+      <fieldtype>INTEGER</fieldtype>
       <ismandatory>T</ismandatory>
-      <isparent>T</isparent>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_name">
       <label>Hierarchy Name</label>
@@ -24,24 +19,8 @@
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_record_type">
       <label>Record Type</label>
-      <fieldtype>SELECT</fieldtype>
+      <fieldtype>TEXT</fieldtype>
       <ismandatory>T</ismandatory>
-      <customfieldfilters />
-      <selectrecordtype>-100</selectrecordtype>
-      <custrecordcustomfieldselectionvalues>
-        <selectionvalue>
-          <valueid>1</valueid>
-          <valuetext>Purchase Order</valuetext>
-        </selectionvalue>
-        <selectionvalue>
-          <valueid>2</valueid>
-          <valuetext>Vendor Bill</valuetext>
-        </selectionvalue>
-        <selectionvalue>
-          <valueid>3</valueid>
-          <valuetext>Begge</valuetext>
-        </selectionvalue>
-      </custrecordcustomfieldselectionvalues>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_currency">
       <label>Currency</label>
@@ -51,23 +30,9 @@
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_status">
       <label>Status</label>
-      <fieldtype>SELECT</fieldtype>
+      <fieldtype>TEXT</fieldtype>
       <ismandatory>T</ismandatory>
-      <defaultvalue>1</defaultvalue>
-      <custrecordcustomfieldselectionvalues>
-        <selectionvalue>
-          <valueid>1</valueid>
-          <valuetext>Draft</valuetext>
-        </selectionvalue>
-        <selectionvalue>
-          <valueid>2</valueid>
-          <valuetext>Active</valuetext>
-        </selectionvalue>
-        <selectionvalue>
-          <valueid>3</valueid>
-          <valuetext>Expired</valuetext>
-        </selectionvalue>
-      </custrecordcustomfieldselectionvalues>
+      <defaultvalue>Draft</defaultvalue>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_start_date">
       <label>Start Date</label>
