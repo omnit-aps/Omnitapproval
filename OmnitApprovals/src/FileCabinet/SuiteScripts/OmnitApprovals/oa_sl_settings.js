@@ -1,0 +1,378 @@
+/**
+ * @NApiVersion 2.1
+ * @NScriptType Suitelet
+ * @NModuleScope SameAccount
+ */
+define([
+  'N/record',
+  'N/search',
+  'N/url',
+  './lib/oa_constants',
+  './oa_engine'
+], (record, search, url, C, engine) => {
+  'use strict';
+
+  function onRequest(context) {
+    const req  = context.request;
+    const resp = context.response;
+    resp.setHeader({ name: 'Content-Type', value: 'text/html; charset=utf-8' });
+
+    if (req.method === 'POST') {
+      handlePost(req, resp);
+      return;
+    }
+
+    const view       = req.parameters.oa_view || 'list';
+    const settingsId = req.parameters.oa_settings_id;
+    const selfUrl    = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
+
+    if (view === 'edit' && settingsId) {
+      resp.write(renderEditPage(settingsId, selfUrl));
+    } else {
+      resp.write(renderListPage(selfUrl));
+    }
+  }
+
+  // ─── POST: save settings ─────────────────────────────────────────────────────
+
+  function handlePost(req, resp) {
+    const p          = req.parameters;
+    const settingsId = p.oa_settings_id;
+    const selfUrl    = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
+
+    try {
+      let rec;
+      if (settingsId && settingsId !== 'new') {
+        rec = record.load({ type: C.RECORDS.SETTINGS, id: settingsId, isDynamic: false });
+      } else {
+        rec = record.create({ type: C.RECORDS.SETTINGS, isDynamic: false });
+      }
+
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.SUBSIDIARY,        value: p.oa_subsidiary });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_PO,         value: p.oa_enable_po === 'T' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_VB,         value: p.oa_enable_vb === 'T' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVER_COUNT,    value: parseInt(p.oa_approver_count, 10) || 1 });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.USE_AMOUNT,        value: p.oa_use_amount === 'T' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER1, value: p.oa_default_approver1 || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER2, value: p.oa_default_approver2 || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVE_STRING,    value: p.oa_approve_string || 'Godkend' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.REJECT_STRING,     value: p.oa_reject_string  || 'Afvis' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_ENABLED,     value: p.oa_email_enabled === 'T' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
+      const savedId = rec.save();
+
+      resp.write(`<script>window.location='${selfUrl}?oa_view=edit&oa_settings_id=${savedId}&oa_saved=1'</script>`);
+    } catch (e) {
+      resp.write(renderError(e.message, selfUrl));
+    }
+  }
+
+  // ─── List View ────────────────────────────────────────────────────────────────
+
+  function renderListPage(selfUrl) {
+    const rows = [];
+    search.create({
+      type:    C.RECORDS.SETTINGS,
+      columns: Object.values(C.FIELDS.SETTINGS).concat(['internalid'])
+    }).run().each(r => {
+      rows.push({
+        id:          r.id,
+        subsidiary:  r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
+        approver1:   r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
+        emailOn:     r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Ja' : 'Nej',
+        enablePO:    r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Ja' : 'Nej',
+        enableVB:    r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Ja' : 'Nej'
+      });
+      return true;
+    });
+
+    const tableRows = rows.map(r => `
+      <tr>
+        <td>${r.subsidiary}</td>
+        <td>${r.approver1}</td>
+        <td><span class="badge ${r.emailOn === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
+        <td><span class="badge ${r.enablePO === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
+        <td><span class="badge ${r.enableVB === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
+        <td><a href="${selfUrl}?oa_view=edit&oa_settings_id=${r.id}" class="link">Rediger</a></td>
+      </tr>`).join('');
+
+    return _shell('Omnit Approvals — Konfiguration', `
+      <div class="page-header">
+        <div>
+          <h1>Konfiguration</h1>
+          <p class="subtitle">Administrer godkendelsesindstillinger per subsidiary</p>
+        </div>
+        <a href="${selfUrl}?oa_view=edit&oa_settings_id=new" class="btn-primary">+ Ny konfiguration</a>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead><tr>
+            <th>Subsidiary</th><th>Standard godkender</th><th>Email</th><th>PO</th><th>VB</th><th></th>
+          </tr></thead>
+          <tbody>${tableRows || '<tr><td colspan="6" class="empty">Ingen konfigurationer endnu.</td></tr>'}</tbody>
+        </table>
+      </div>`);
+  }
+
+  // ─── Edit View ────────────────────────────────────────────────────────────────
+
+  function renderEditPage(settingsId, selfUrl) {
+    let s = {};
+    let hierarchies = [];
+    let thresholds  = {};
+
+    if (settingsId !== 'new') {
+      try {
+        const rec = record.load({ type: C.RECORDS.SETTINGS, id: settingsId, isDynamic: false });
+        Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k] = rec.getValue(fid); });
+        s.subsidiary_text = rec.getText(C.FIELDS.SETTINGS.SUBSIDIARY);
+
+        // Load hierarchies for this settings record
+        search.create({
+          type:    C.RECORDS.HIERARCHY,
+          filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
+          columns: Object.values(C.FIELDS.HIERARCHY)
+        }).run().each(r => {
+          const h = {
+            id:          r.id,
+            name:        r.getValue(C.FIELDS.HIERARCHY.NAME),
+            recordType:  r.getText(C.FIELDS.HIERARCHY.RECORD_TYPE),
+            status:      r.getText(C.FIELDS.HIERARCHY.STATUS),
+            highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)
+          };
+          hierarchies.push(h);
+          thresholds[r.id] = [];
+          return true;
+        });
+
+        // Load thresholds
+        if (hierarchies.length) {
+          search.create({
+            type:    C.RECORDS.THRESHOLD,
+            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchies.map(h => h.id)]],
+            columns: Object.values(C.FIELDS.THRESHOLD)
+          }).run().each(r => {
+            const hId = r.getValue(C.FIELDS.THRESHOLD.HIERARCHY);
+            if (thresholds[hId]) {
+              thresholds[hId].push({
+                id:         r.id,
+                label:      r.getValue(C.FIELDS.THRESHOLD.LABEL),
+                minAmount:  r.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT),
+                maxAmount:  r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT),
+                approver:   r.getText(C.FIELDS.THRESHOLD.APPROVER),
+                sortOrder:  r.getValue(C.FIELDS.THRESHOLD.SORT_ORDER)
+              });
+            }
+            return true;
+          });
+        }
+      } catch (e) {
+        return renderError(`Konfiguration med ID ${settingsId} ikke fundet.`, selfUrl);
+      }
+    }
+
+    const matrixHtml = hierarchies.map(h => {
+      const cols = thresholds[h.id] || [];
+      const headerCells = cols.map(t => `<th class="matrix-col">${t.label || t.minAmount}</th>`).join('');
+      const bodyCells   = cols.map(t => `<td class="matrix-cell">${t.approver || '—'}</td>`).join('');
+      return `
+        <div class="hierarchy-block">
+          <div class="hierarchy-header">
+            <strong>${h.name}</strong>
+            <span class="badge ${h.status === 'Active' ? 'badge-green' : 'badge-grey'}">${h.status}</span>
+            <span class="muted">${h.recordType}</span>
+            ${h.highestOnly ? '<span class="badge badge-blue">Kun højeste</span>' : ''}
+          </div>
+          <div class="table-scroll">
+            <table class="matrix-table">
+              <thead><tr><th>Godkender</th>${headerCells}</tr></thead>
+              <tbody><tr><td class="muted">Tærskelværdier</td>${bodyCells}</tr></tbody>
+            </table>
+          </div>
+        </div>`;
+    }).join('') || '<p class="muted">Ingen hierarkier oprettet endnu.</p>';
+
+    const saved = '';
+    return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
+      <div class="page-header">
+        <div>
+          <a href="${selfUrl}" class="back-link">← Tilbage til liste</a>
+          <h1>${settingsId === 'new' ? 'Ny konfiguration' : s.subsidiary_text || 'Rediger konfiguration'}</h1>
+        </div>
+      </div>
+
+      <form method="POST" action="${selfUrl}">
+        <input type="hidden" name="oa_settings_id" value="${settingsId}">
+
+        <div class="card section">
+          <h2>Generelle indstillinger</h2>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Subsidiary *</label>
+              <input type="text" name="oa_subsidiary" value="${s.subsidiary || ''}" placeholder="Subsidiary intern ID" required>
+            </div>
+            <div class="form-group">
+              <label>Antal godkendere</label>
+              <select name="oa_approver_count">
+                <option value="1" ${s.approver_count == 1 ? 'selected' : ''}>1 — Et trin</option>
+                <option value="2" ${s.approver_count == 2 ? 'selected' : ''}>2 — To trin</option>
+              </select>
+            </div>
+            <div class="form-group toggle-row">
+              <label>Aktiver PO godkendelse</label>
+              <label class="toggle"><input type="checkbox" name="oa_enable_po_cb" onchange="syncHidden(this,'oa_enable_po')" ${s.enable_po ? 'checked' : ''}><span class="slider"></span></label>
+              <input type="hidden" name="oa_enable_po" value="${s.enable_po ? 'T' : 'F'}">
+            </div>
+            <div class="form-group toggle-row">
+              <label>Aktiver Vendor Bill godkendelse</label>
+              <label class="toggle"><input type="checkbox" name="oa_enable_vb_cb" onchange="syncHidden(this,'oa_enable_vb')" ${s.enable_vb ? 'checked' : ''}><span class="slider"></span></label>
+              <input type="hidden" name="oa_enable_vb" value="${s.enable_vb ? 'T' : 'F'}">
+            </div>
+            <div class="form-group toggle-row">
+              <label>Brug beløbstærskler</label>
+              <label class="toggle"><input type="checkbox" name="oa_use_amount_cb" onchange="syncHidden(this,'oa_use_amount')" ${s.use_amount ? 'checked' : ''}><span class="slider"></span></label>
+              <input type="hidden" name="oa_use_amount" value="${s.use_amount ? 'T' : 'F'}">
+            </div>
+          </div>
+        </div>
+
+        <div class="card section">
+          <h2>Godkendere</h2>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Standard godkender 1 *</label>
+              <input type="text" name="oa_default_approver1" value="${s.default_approver1 || ''}" placeholder="Medarbejder intern ID">
+            </div>
+            <div class="form-group">
+              <label>Standard godkender 2 <span class="muted">(kun ved 2-trins)</span></label>
+              <input type="text" name="oa_default_approver2" value="${s.default_approver2 || ''}" placeholder="Medarbejder intern ID">
+            </div>
+          </div>
+        </div>
+
+        <div class="card section">
+          <h2>Email & knapper</h2>
+          <div class="form-grid">
+            <div class="form-group toggle-row">
+              <label>Aktiver email godkendelse</label>
+              <label class="toggle"><input type="checkbox" name="oa_email_enabled_cb" onchange="syncHidden(this,'oa_email_enabled')" ${s.email_enabled ? 'checked' : ''}><span class="slider"></span></label>
+              <input type="hidden" name="oa_email_enabled" value="${s.email_enabled ? 'T' : 'F'}">
+            </div>
+            <div class="form-group">
+              <label>Token udløber (dage)</label>
+              <input type="number" name="oa_token_expiry_days" value="${s.token_expiry_days || 7}" min="1" max="30">
+            </div>
+            <div class="form-group">
+              <label>Godkend-knap tekst</label>
+              <input type="text" name="oa_approve_string" value="${s.approve_string || 'Godkend'}">
+            </div>
+            <div class="form-group">
+              <label>Afvis-knap tekst</label>
+              <input type="text" name="oa_reject_string" value="${s.reject_string || 'Afvis'}">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <a href="${selfUrl}" class="btn-secondary">Annuller</a>
+          <button type="submit" class="btn-primary">Gem indstillinger</button>
+        </div>
+      </form>
+
+      <div class="card section">
+        <div class="section-header">
+          <h2>Godkendelseshierarki / Matrix</h2>
+        </div>
+        ${matrixHtml}
+        <p class="muted" style="margin-top:16px;font-size:13px">
+          Hierarkier og tærskelværdier administreres direkte på custom records i NetSuite (customrecord_oa_hierarchy / customrecord_oa_threshold).
+        </p>
+      </div>`);
+  }
+
+  // ─── Shell / CSS ─────────────────────────────────────────────────────────────
+
+  function _shell(title, body) {
+    return `<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#f0efee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#312d2a;font-size:14px}
+  .topbar{background:#312d2a;padding:0 32px;height:52px;display:flex;align-items:center;gap:16px}
+  .topbar-logo{color:#c74634;font-weight:700;font-size:16px;letter-spacing:.5px}
+  .topbar-sep{color:#666;font-size:18px}
+  .topbar-title{color:#ccc;font-size:14px}
+  .main{max-width:1100px;margin:0 auto;padding:32px 24px}
+  .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px}
+  h1{font-size:24px;font-weight:700;color:#312d2a}
+  h2{font-size:16px;font-weight:600;color:#312d2a;margin-bottom:20px}
+  .subtitle{color:#888;font-size:14px;margin-top:4px}
+  .card{background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:20px}
+  .section{margin-bottom:20px}
+  .back-link{color:#888;font-size:13px;text-decoration:none;display:block;margin-bottom:6px}
+  .back-link:hover{color:#c74634}
+  .data-table{width:100%;border-collapse:collapse}
+  .data-table th{text-align:left;padding:10px 14px;font-size:12px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee}
+  .data-table td{padding:12px 14px;border-bottom:1px solid #f5f5f5;font-size:14px}
+  .data-table tr:last-child td{border-bottom:none}
+  .data-table tr:hover td{background:#fafafa}
+  .empty{color:#bbb;text-align:center;padding:32px!important}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+  .badge-green{background:#e8f5e9;color:#2e7d32}
+  .badge-grey{background:#f5f5f5;color:#999}
+  .badge-blue{background:#e3f2fd;color:#1565c0}
+  .link{color:#c74634;text-decoration:none;font-weight:500}
+  .link:hover{text-decoration:underline}
+  .btn-primary{background:#c74634;color:#fff;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;border:none;cursor:pointer;display:inline-block}
+  .btn-primary:hover{background:#b03d2e}
+  .btn-secondary{background:#f5f5f5;color:#555;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;border:none;cursor:pointer;display:inline-block}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+  .form-group label{display:block;font-size:13px;font-weight:600;color:#555;margin-bottom:6px}
+  .form-group input,.form-group select{width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;outline:none;transition:border .15s}
+  .form-group input:focus,.form-group select:focus{border-color:#c74634}
+  .toggle-row{display:flex;align-items:center;gap:12px}
+  .toggle-row label:first-child{flex:1;margin:0}
+  .toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+  .toggle input{opacity:0;width:0;height:0}
+  .slider{position:absolute;cursor:pointer;inset:0;background:#ddd;border-radius:12px;transition:.2s}
+  .slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+  input:checked+.slider{background:#c74634}
+  input:checked+.slider:before{transform:translateX(20px)}
+  .form-actions{display:flex;justify-content:flex-end;gap:12px;margin-bottom:24px}
+  .muted{color:#aaa;font-size:13px}
+  .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .hierarchy-block{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:16px}
+  .hierarchy-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .table-scroll{overflow-x:auto}
+  .matrix-table{width:100%;border-collapse:collapse;font-size:13px}
+  .matrix-table th{background:#f8f8f8;padding:8px 14px;text-align:center;border:1px solid #eee;font-weight:600;font-size:12px}
+  .matrix-table th:first-child{text-align:left}
+  .matrix-table td{padding:8px 14px;text-align:center;border:1px solid #eee}
+  .matrix-table td:first-child{text-align:left;font-weight:500}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="topbar-logo">OMNI:T</span>
+  <span class="topbar-sep">/</span>
+  <span class="topbar-title">Omnit Approvals — Indstillinger</span>
+</div>
+<div class="main">${body}</div>
+<script>
+function syncHidden(cb, name) {
+  document.querySelector('[name="'+name+'"]').value = cb.checked ? 'T' : 'F';
+}
+</script>
+</body></html>`;
+  }
+
+  function renderError(msg, selfUrl) {
+    return _shell('Fejl', `<div class="card"><h2>Fejl</h2><p style="color:#c74634">${msg}</p><br><a href="${selfUrl}" class="link">← Tilbage</a></div>`);
+  }
+
+  return { onRequest };
+});
