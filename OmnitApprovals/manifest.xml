@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest projecttype="ACCOUNTCUSTOMIZATION">
+  <projectname>OmnitApprovals</projectname>
+  <frameworkversion>1.0</frameworkversion>
+  <dependencies>
+    <features>
+      <feature required="true">SUBSIDIARIES</feature>
+      <feature required="true">APPROVALS</feature>
+    </features>
+  </dependencies>
+</manifest>
