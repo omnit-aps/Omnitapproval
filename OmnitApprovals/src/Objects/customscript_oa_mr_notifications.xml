@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mapreducescript scriptid="customscript_oa_mr_notifications">
+  <name>OA - Email Notifications Map/Reduce</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_mr_notifications.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_mr_notifications">
+      <status>TESTING</status>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>F</allroles>
+    </scriptdeployment>
+  </scriptdeployments>
+  <custscriptparameters>
+    <custscriptparameter scriptid="custscript_oa_mr_record_id">
+      <label>Record ID</label>
+      <type>INTEGER</type>
+    </custscriptparameter>
+    <custscriptparameter scriptid="custscript_oa_mr_record_type">
+      <label>Record Type</label>
+      <type>TEXT</type>
+    </custscriptparameter>
+    <custscriptparameter scriptid="custscript_oa_mr_raw_token">
+      <label>Raw Token</label>
+      <type>TEXT</type>
+    </custscriptparameter>
+  </custscriptparameters>
+</mapreducescript>
