@@ -3,5 +3,4 @@
   <label>Hierarchy Used</label>
   <fieldtype>INTEGER</fieldtype>
   <ismandatory>F</ismandatory>
-  <displaytype>INLINE</displaytype>
 </transactionbodycustomfield>
