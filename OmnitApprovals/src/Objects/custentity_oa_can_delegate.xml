@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entitycustomfield scriptid="custentity_oa_can_delegate">
+  <label>Can Delegate</label>
+  <fieldtype>CHECKBOX</fieldtype>
+  <appliestoemployee>T</appliestoemployee>
+  <appliestoperson>F</appliestoperson>
+  <appliestocontact>F</appliestocontact>
+  <appliestocustomer>F</appliestocustomer>
+  <appliestopartner>F</appliestopartner>
+  <appliestovendor>F</appliestovendor>
+  <ismandatory>F</ismandatory>
+  <defaultchecked>F</defaultchecked>
+</entitycustomfield>
