@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Employee custom fields for Omnit Approvals -->
-<!-- Deploy each field individually; grouped here for readability -->
-
-<!-- custentity_oa_is_approver -->
-<entitycustomfield scriptid="custentity_oa_is_approver">
-  <label>Is Approver</label>
-  <fieldtype>CHECKBOX</fieldtype>
+<entitycustomfield scriptid="custentity_oa_employee_fields">
+  <label>OA Internal Reference</label>
+  <fieldtype>TEXT</fieldtype>
   <appliestoemployee>T</appliestoemployee>
   <appliestoperson>F</appliestoperson>
   <appliestocontact>F</appliestocontact>
@@ -13,6 +9,5 @@
   <appliestopartner>F</appliestopartner>
   <appliestovendor>F</appliestovendor>
   <ismandatory>F</ismandatory>
-  <defaultchecked>F</defaultchecked>
-  <subtab>Omnit Approvals</subtab>
+  <displaytype>HIDDEN</displaytype>
 </entitycustomfield>
