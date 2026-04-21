@@ -12,7 +12,7 @@
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
       <allemployees>T</allemployees>
-      <allroles>F</allroles>
+      <allroles>T</allroles>
     </scriptdeployment>
   </scriptdeployments>
 </suitelet>
