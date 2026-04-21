@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customrecordtype scriptid="customrecord_oa_log">
+  <recordname>OA - Approval Log</recordname>
+  <isinactive>F</isinactive>
+  <allowattachments>F</allowattachments>
+  <allowinlineediting>F</allowinlineediting>
+  <allowquickadd>F</allowquickadd>
+  <allowuioverride>F</allowuioverride>
+  <enablenotes>F</enablenotes>
+  <isordered>F</isordered>
+  <links />
+  <permissions>
+    <permission>
+      <permittedrole>-1</permittedrole>
+      <permissionlevel>VIEW</permissionlevel>
+    </permission>
+  </permissions>
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_oal_transaction">
+      <label>Transaction</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-2</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <isparent>F</isparent>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_action">
+      <label>Action</label>
+      <fieldtype>SELECT</fieldtype>
+      <ismandatory>T</ismandatory>
+      <custrecordcustomfieldselectionvalues>
+        <selectionvalue><valueid>1</valueid><valuetext>Submitted</valuetext></selectionvalue>
+        <selectionvalue><valueid>2</valueid><valuetext>Approved</valuetext></selectionvalue>
+        <selectionvalue><valueid>3</valueid><valuetext>Rejected</valuetext></selectionvalue>
+        <selectionvalue><valueid>4</valueid><valuetext>Delegated</valuetext></selectionvalue>
+        <selectionvalue><valueid>5</valueid><valuetext>Reassigned</valuetext></selectionvalue>
+        <selectionvalue><valueid>6</valueid><valuetext>Reset</valuetext></selectionvalue>
+      </custrecordcustomfieldselectionvalues>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_actor">
+      <label>Actor</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>T</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_target">
+      <label>Target</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_timestamp">
+      <label>Timestamp</label>
+      <fieldtype>DATETIMETZ</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_comment">
+      <label>Comment</label>
+      <fieldtype>TEXTAREA</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_step">
+      <label>Step</label>
+      <fieldtype>INTEGER</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oal_source">
+      <label>Source</label>
+      <fieldtype>SELECT</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>1</defaultvalue>
+      <custrecordcustomfieldselectionvalues>
+        <selectionvalue><valueid>1</valueid><valuetext>NetSuite</valuetext></selectionvalue>
+        <selectionvalue><valueid>2</valueid><valuetext>Email</valuetext></selectionvalue>
+      </custrecordcustomfieldselectionvalues>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>
