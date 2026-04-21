@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customrecordtype scriptid="customrecord_oa_threshold">
+  <recordname>OA - Amount Threshold Rule</recordname>
+  <isinactive>F</isinactive>
+  <allowattachments>F</allowattachments>
+  <allowinlineediting>T</allowinlineediting>
+  <allowquickadd>T</allowquickadd>
+  <allowuioverride>F</allowuioverride>
+  <enablenotes>F</enablenotes>
+  <isordered>T</isordered>
+  <links />
+  <customrecordcustomfields>
+    <customrecordcustomfield scriptid="custrecord_oat_hierarchy">
+      <label>Parent Hierarchy</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>customrecord_oa_hierarchy</selectrecordtype>
+      <ismandatory>T</ismandatory>
+      <isparent>T</isparent>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_label">
+      <label>Column Label</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_min_amount">
+      <label>Minimum Amount</label>
+      <fieldtype>CURRENCY</fieldtype>
+      <ismandatory>T</ismandatory>
+      <defaultvalue>0</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_max_amount">
+      <label>Maximum Amount</label>
+      <fieldtype>CURRENCY</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_approver">
+      <label>Approver</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>T</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_sort_order">
+      <label>Sort Order</label>
+      <fieldtype>INTEGER</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>10</defaultvalue>
+    </customrecordcustomfield>
+  </customrecordcustomfields>
+</customrecordtype>
