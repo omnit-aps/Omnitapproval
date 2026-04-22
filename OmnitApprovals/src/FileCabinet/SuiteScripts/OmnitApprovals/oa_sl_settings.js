@@ -61,7 +61,7 @@ define([
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
       const savedId = rec.save();
 
-      resp.write(`<script>window.location='${selfUrl}?oa_view=edit&oa_settings_id=${savedId}&oa_saved=1'</script>`);
+      resp.write(`<script>window.location='${selfUrl}&oa_view=edit&oa_settings_id=${savedId}&oa_saved=1'</script>`);
     } catch (e) {
       resp.write(renderError(e.message, selfUrl));
     }
@@ -93,7 +93,7 @@ define([
         <td><span class="badge ${r.emailOn === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
         <td><span class="badge ${r.enablePO === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
         <td><span class="badge ${r.enableVB === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
-        <td><a href="${selfUrl}?oa_view=edit&oa_settings_id=${r.id}" class="link">Rediger</a></td>
+        <td><a href="${selfUrl}&oa_view=edit&oa_settings_id=${r.id}" class="link">Rediger</a></td>
       </tr>`).join('');
 
     return _shell('Omnit Approvals — Konfiguration', `
@@ -102,7 +102,7 @@ define([
           <h1>Konfiguration</h1>
           <p class="subtitle">Administrer godkendelsesindstillinger per subsidiary</p>
         </div>
-        <a href="${selfUrl}?oa_view=edit&oa_settings_id=new" class="btn-primary">+ Ny konfiguration</a>
+        <a href="${selfUrl}&oa_view=edit&oa_settings_id=new" class="btn-primary">+ Ny konfiguration</a>
       </div>
       <div class="card">
         <table class="data-table">
@@ -192,7 +192,6 @@ define([
         </div>`;
     }).join('') || '<p class="muted">Ingen hierarkier oprettet endnu.</p>';
 
-    const saved = '';
     return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
       <div class="page-header">
         <div>
