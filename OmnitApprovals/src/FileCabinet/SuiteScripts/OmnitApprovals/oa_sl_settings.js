@@ -48,13 +48,14 @@ define([
         rec = record.create({ type: C.RECORDS.SETTINGS, isDynamic: false });
       }
 
+      rec.setValue({ fieldId: 'name',                               value: 'OA Settings - ' + p.oa_subsidiary });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.SUBSIDIARY,        value: p.oa_subsidiary });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_PO,         value: p.oa_enable_po === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_VB,         value: p.oa_enable_vb === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVER_COUNT,    value: parseInt(p.oa_approver_count, 10) || 1 });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.USE_AMOUNT,        value: p.oa_use_amount === 'T' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER1, value: p.oa_default_approver1 || '' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER2, value: p.oa_default_approver2 || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER1, value: parseInt(p.oa_default_approver1, 10) || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER2, value: parseInt(p.oa_default_approver2, 10) || '' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVE_STRING,    value: p.oa_approve_string || 'Godkend' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.REJECT_STRING,     value: p.oa_reject_string  || 'Afvis' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_ENABLED,     value: p.oa_email_enabled === 'T' });
@@ -127,7 +128,6 @@ define([
         Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k] = rec.getValue(fid); });
         s.subsidiary_text = rec.getText(C.FIELDS.SETTINGS.SUBSIDIARY);
 
-        // Load hierarchies for this settings record
         search.create({
           type:    C.RECORDS.HIERARCHY,
           filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
@@ -145,7 +145,6 @@ define([
           return true;
         });
 
-        // Load thresholds
         if (hierarchies.length) {
           search.create({
             type:    C.RECORDS.THRESHOLD,
@@ -240,11 +239,11 @@ define([
           <div class="form-grid">
             <div class="form-group">
               <label>Standard godkender 1 *</label>
-              <input type="text" name="oa_default_approver1" value="${s.default_approver1 || ''}" placeholder="Medarbejder intern ID">
+              ${employeeSelect('oa_default_approver1', s.default_approver1)}
             </div>
             <div class="form-group">
               <label>Standard godkender 2 <span class="muted">(kun ved 2-trins)</span></label>
-              <input type="text" name="oa_default_approver2" value="${s.default_approver2 || ''}" placeholder="Medarbejder intern ID">
+              ${employeeSelect('oa_default_approver2', s.default_approver2)}
             </div>
           </div>
         </div>
@@ -287,6 +286,22 @@ define([
           Hierarkier og tærskelværdier administreres direkte på custom records i NetSuite (customrecord_oa_hierarchy / customrecord_oa_threshold).
         </p>
       </div>`);
+  }
+
+  // ─── Employee dropdown helper ─────────────────────────────────────────────────
+
+  function employeeSelect(fieldName, selectedId) {
+    const opts = ['<option value="">— Vælg medarbejder —</option>'];
+    search.create({
+      type:    'employee',
+      filters: [['isinactive', 'is', 'F']],
+      columns: ['internalid', 'entityid']
+    }).run().each(r => {
+      const sel = String(r.id) === String(selectedId) ? ' selected' : '';
+      opts.push(`<option value="${r.id}"${sel}>${r.getValue('entityid')}</option>`);
+      return true;
+    });
+    return `<select name="${fieldName}">${opts.join('')}</select>`;
   }
 
   // ─── Shell / CSS ─────────────────────────────────────────────────────────────
