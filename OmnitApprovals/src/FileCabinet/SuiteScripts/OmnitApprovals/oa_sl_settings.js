@@ -125,7 +125,8 @@ define([
     if (settingsId !== 'new') {
       try {
         const rec = record.load({ type: C.RECORDS.SETTINGS, id: settingsId, isDynamic: false });
-        Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k] = rec.getValue(fid); });
+        // Store values under lowercase keys to match template references (e.g. s.subsidiary, s.enable_po)
+        Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k.toLowerCase()] = rec.getValue(fid); });
         s.subsidiary_text = rec.getText(C.FIELDS.SETTINGS.SUBSIDIARY);
 
         search.create({
@@ -258,7 +259,7 @@ define([
             </div>
             <div class="form-group">
               <label>Token udløber (dage)</label>
-              <input type="number" name="oa_token_expiry_days" value="${s.token_expiry_days || 7}" min="1" max="30">
+              <input type="number" name="oa_token_expiry_days" value="${(s.token_expiry_days || typeof s.token_expiry_days === 'number') ? s.token_expiry_days : 7}" min="1" max="30">
             </div>
             <div class="form-group">
               <label>Godkend-knap tekst</label>
