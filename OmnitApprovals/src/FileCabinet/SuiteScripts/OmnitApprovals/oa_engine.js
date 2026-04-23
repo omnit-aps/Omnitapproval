@@ -154,7 +154,12 @@ define([
 
   function processApproval(recordId, recordType, actorId, step, source) {
     source = source || C.LOG_SOURCES.NETSUITE;
-    const txn        = record.load({ type: recordType, id: recordId, isDynamic: false });
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      return { success: false, message: 'Record not found.' };
+    }
     const currentStep = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
     const approver2   = txn.getValue(C.FIELDS.TRANSACTION.APPROVER2);
 
@@ -193,7 +198,12 @@ define([
 
   function processDecline(recordId, recordType, actorId, comment, source) {
     source = source || C.LOG_SOURCES.NETSUITE;
-    const txn  = record.load({ type: recordType, id: recordId, isDynamic: false });
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      return { success: false, message: 'Record not found.' };
+    }
     const step = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
 
     txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.REJECTED });
@@ -212,7 +222,12 @@ define([
     if (!canDelegate)      return { success: false, message: 'Actor cannot delegate.' };
     if (!targetIsApprover) return { success: false, message: 'Target is not an approver.' };
 
-    const txn       = record.load({ type: recordType, id: recordId, isDynamic: false });
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      return { success: false, message: 'Record not found.' };
+    }
     const step      = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
     const stepField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
 
@@ -239,7 +254,12 @@ define([
     const rawToken    = utils.generateToken();
     const hashedToken = utils.hashToken(rawToken);
 
-    const txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      return { success: false, message: 'Record not found.' };
+    }
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,   value: 1 });
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,      value: newApproverId });
     txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.PENDING });

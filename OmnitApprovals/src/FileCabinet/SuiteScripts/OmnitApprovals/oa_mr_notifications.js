@@ -100,10 +100,10 @@ define([
       const approverRaw = step === 1
         ? fields[C.FIELDS.TRANSACTION.APPROVER1]
         : fields[C.FIELDS.TRANSACTION.APPROVER2];
-      const approverId = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : approverRaw;
+      const approverId = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : null;
 
       const submittedByRaw = fields[C.FIELDS.TRANSACTION.SUBMITTED_BY];
-      const submittedById  = Array.isArray(submittedByRaw) && submittedByRaw[0] ? submittedByRaw[0].value : submittedByRaw;
+      const submittedById  = Array.isArray(submittedByRaw) && submittedByRaw[0] ? submittedByRaw[0].value : null;
 
       const subsidiaryId   = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].value : null;
       const subsidiaryName = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text  : '';

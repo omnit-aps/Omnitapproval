@@ -3,7 +3,7 @@
  * @NScriptType ClientScript
  * @NModuleScope SameAccount
  */
-define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, https, url, dialog) => {
+define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dialog) => {
   'use strict';
 
   function pageInit() {
@@ -13,7 +13,7 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
   // ─── Approve ─────────────────────────────────────────────────────────────────
 
   function OA_approve(slUrl) {
-    dialog.confirm({ title: 'Godkend transaktion', message: 'Er du sikker på at du vil godkende denne transaktion?' })
+    dialog.confirm({ title: 'Approve transaction', message: 'Are you sure you want to approve this transaction?' })
       .then(confirmed => {
         if (!confirmed) return;
         const rec = currentRecord.get();
@@ -29,7 +29,7 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
   // ─── Decline ─────────────────────────────────────────────────────────────────
 
   function OA_decline(slUrl) {
-    _promptComment('Afvis transaktion', 'Angiv årsag til afvisning (påkrævet):')
+    _promptComment('Reject transaction', 'Enter reason for rejection (required):')
       .then(comment => {
         if (comment === null) return;
         const rec = currentRecord.get();
@@ -46,7 +46,7 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
   // ─── Delegate ────────────────────────────────────────────────────────────────
 
   function OA_delegate(slUrl) {
-    const targetId = prompt('Angiv medarbejder-ID for ny godkender:');
+    const targetId = prompt('Enter the internal ID of the employee to delegate to:');
     if (!targetId) return;
     const rec = currentRecord.get();
     _post(slUrl, {
@@ -60,14 +60,14 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
   // ─── Reset (Manager) ─────────────────────────────────────────────────────────
 
   function OA_reset(slUrl) {
-    const newApprover = prompt('Angiv medarbejder-ID for ny godkender 1:');
+    const newApprover = prompt('Enter the internal ID of the new approver:');
     if (!newApprover) return;
     const rec = currentRecord.get();
     _post(slUrl, {
-      oa_action:        'reset',
-      oa_record_id:     rec.id,
-      oa_record_type:   rec.type,
-      oa_new_approver:  newApprover
+      oa_action:       'reset',
+      oa_record_id:    rec.id,
+      oa_record_type:  rec.type,
+      oa_new_approver: newApprover
     });
   }
 
@@ -80,11 +80,30 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   function _post(slUrl, params) {
-    const response = https.post({ url: slUrl, body: params });
-    if (response.code === 200) {
+    const body = Object.keys(params)
+      .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k] !== null && params[k] !== undefined ? params[k] : ''))
+      .join('&');
+
+    let response;
+    try {
+      response = https.post({
+        url:     slUrl,
+        body,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      });
+    } catch (e) {
+      dialog.alert({ title: 'Error', message: 'Request failed. Please try again.' });
+      return;
+    }
+
+    let result;
+    try { result = JSON.parse(response.body); } catch (e) { result = {}; }
+
+    if (response.code === 200 && result.success !== false) {
       window.location.reload();
     } else {
-      dialog.alert({ title: 'Fejl', message: 'Der opstod en fejl. Prøv igen.' });
+      const msg = result.message || 'An error occurred. Please try again.';
+      dialog.alert({ title: 'Error', message: msg });
     }
   }
 
@@ -93,7 +112,7 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/dialog'], (currentRecord, h
       const comment = prompt(`${title}\n${message}`);
       if (comment === null) { resolve(null); return; }
       if (!comment.trim()) {
-        dialog.alert({ title: 'Påkrævet felt', message: 'Du skal angive en årsag.' })
+        dialog.alert({ title: 'Required field', message: 'A reason is required.' })
           .then(() => resolve(null));
         return;
       }

@@ -52,7 +52,13 @@ define([
     const rawToken = utils.generateToken();
     const hashedToken = utils.hashToken(rawToken);
 
-    const txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      log.error('OA: record.load failed in afterSubmit', e.message);
+      return;
+    }
     txn.setValue({ fieldId: 'approvalstatus',                         value: C.APPROVAL_STATUS.PENDING });
     try { txn.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', rec.type); }
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,        value: 1 });

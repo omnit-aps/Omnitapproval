@@ -161,13 +161,15 @@ define([
             });
             tIds.sort((a, b) => a.sortOrder - b.sortOrder);
             tIds.forEach(({ id }) => {
-              const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
-              rows.push({
-                id:        String(id),
-                minAmount: String(t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0),
-                approver1: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || ''),
-                approver2: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || '')
-              });
+              try {
+                const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
+                rows.push({
+                  id:        String(id),
+                  minAmount: String(t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0),
+                  approver1: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || ''),
+                  approver2: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || '')
+                });
+              } catch (e) { /* threshold deleted since search ran — skip */ }
             });
             return false;
           });
@@ -492,8 +494,13 @@ define([
       let t;
       if (rowId && rowId !== 'new') {
         const parsedId = parseInt(rowId, 10);
-        t = record.load({ type: C.RECORDS.THRESHOLD, id: parsedId, isDynamic: false });
-        submittedIds.push(parsedId);
+        try {
+          t = record.load({ type: C.RECORDS.THRESHOLD, id: parsedId, isDynamic: false });
+          submittedIds.push(parsedId);
+        } catch (e) {
+          t = record.create({ type: C.RECORDS.THRESHOLD, isDynamic: false });
+          t.setValue({ fieldId: 'name', value: 'Threshold ' + (i + 1) });
+        }
       } else {
         t = record.create({ type: C.RECORDS.THRESHOLD, isDynamic: false });
         t.setValue({ fieldId: 'name', value: 'Threshold ' + (i + 1) });
