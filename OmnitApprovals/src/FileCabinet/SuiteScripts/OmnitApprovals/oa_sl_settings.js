@@ -33,13 +33,25 @@ define([
     }
   }
 
-  // ─── POST: save settings ─────────────────────────────────────────────────────
+  // ─── POST ────────────────────────────────────────────────────────────────────
 
   function handlePost(req, resp) {
-    const p          = req.parameters;
-    const settingsId = p.oa_settings_id;
-    const selfUrl    = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
+    const p       = req.parameters;
+    const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
 
+    // Delete hierarchy action
+    if (p.oa_action === 'delete_hierarchy') {
+      try {
+        record.delete({ type: C.RECORDS.HIERARCHY, id: parseInt(p.oa_hierarchy_id, 10) });
+      } catch (e) {
+        log.error('OA Settings: delete hierarchy failed', e.message);
+      }
+      resp.write(`<script>window.location='${selfUrl}&oa_view=edit&oa_settings_id=${p.oa_settings_id}'</script>`);
+      return;
+    }
+
+    // Save settings
+    const settingsId = p.oa_settings_id;
     try {
       let rec;
       if (settingsId && settingsId !== 'new') {
@@ -77,12 +89,12 @@ define([
       columns: Object.values(C.FIELDS.SETTINGS).concat(['internalid'])
     }).run().each(r => {
       rows.push({
-        id:          r.id,
-        subsidiary:  r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
-        approver1:   r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
-        emailOn:     r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Ja' : 'Nej',
-        enablePO:    r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Ja' : 'Nej',
-        enableVB:    r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Ja' : 'Nej'
+        id:         r.id,
+        subsidiary: r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
+        approver1:  r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
+        emailOn:    r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Ja' : 'Nej',
+        enablePO:   r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Ja' : 'Nej',
+        enableVB:   r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Ja' : 'Nej'
       });
       return true;
     });
@@ -125,7 +137,6 @@ define([
     if (settingsId !== 'new') {
       try {
         const rec = record.load({ type: C.RECORDS.SETTINGS, id: settingsId, isDynamic: false });
-        // Store values under lowercase keys to match template references (e.g. s.subsidiary, s.enable_po)
         Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k.toLowerCase()] = rec.getValue(fid); });
         s.subsidiary_text = rec.getText(C.FIELDS.SETTINGS.SUBSIDIARY);
 
@@ -134,14 +145,13 @@ define([
           filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
           columns: Object.values(C.FIELDS.HIERARCHY)
         }).run().each(r => {
-          const h = {
+          hierarchies.push({
             id:          r.id,
-            name:        r.getValue(C.FIELDS.HIERARCHY.NAME),
-            recordType:  r.getText(C.FIELDS.HIERARCHY.RECORD_TYPE),
-            status:      r.getText(C.FIELDS.HIERARCHY.STATUS),
+            name:        r.getValue(C.FIELDS.HIERARCHY.NAME) || '—',
+            recordType:  r.getText(C.FIELDS.HIERARCHY.RECORD_TYPE) || '—',
+            status:      r.getText(C.FIELDS.HIERARCHY.STATUS) || '—',
             highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)
-          };
-          hierarchies.push(h);
+          });
           thresholds[r.id] = [];
           return true;
         });
@@ -155,12 +165,12 @@ define([
             const hId = r.getValue(C.FIELDS.THRESHOLD.HIERARCHY);
             if (thresholds[hId]) {
               thresholds[hId].push({
-                id:         r.id,
-                label:      r.getValue(C.FIELDS.THRESHOLD.LABEL),
-                minAmount:  r.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT),
-                maxAmount:  r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT),
-                approver:   r.getText(C.FIELDS.THRESHOLD.APPROVER),
-                sortOrder:  r.getValue(C.FIELDS.THRESHOLD.SORT_ORDER)
+                id:        r.id,
+                label:     r.getValue(C.FIELDS.THRESHOLD.LABEL),
+                minAmount: r.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT),
+                maxAmount: r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT),
+                approver:  r.getText(C.FIELDS.THRESHOLD.APPROVER),
+                sortOrder: r.getValue(C.FIELDS.THRESHOLD.SORT_ORDER)
               });
             }
             return true;
@@ -171,18 +181,41 @@ define([
       }
     }
 
+    // Build URLs for hierarchy management
+    const newHierarchyUrl = settingsId !== 'new'
+      ? url.resolveRecord({ recordType: C.RECORDS.HIERARCHY, isEditMode: true }) + '&custrecord_oah_settings=' + settingsId
+      : '#';
+
+    const hierarchyRows = hierarchies.map(h => {
+      const editUrl = url.resolveRecord({ recordType: C.RECORDS.HIERARCHY, recordId: h.id, isEditMode: true });
+      return `
+        <tr>
+          <td><strong>${h.name}</strong></td>
+          <td>${h.recordType}</td>
+          <td><span class="badge ${h.status === 'Aktiv' || h.status === 'Active' ? 'badge-green' : 'badge-grey'}">${h.status}</span></td>
+          <td>${h.highestOnly ? 'Ja' : 'Nej'}</td>
+          <td>
+            <a href="${editUrl}" class="link" target="_blank">Rediger</a>
+            &nbsp;·&nbsp;
+            <form method="POST" action="${selfUrl}" style="display:inline" onsubmit="return confirm('Slet dette hierarki?')">
+              <input type="hidden" name="oa_action" value="delete_hierarchy">
+              <input type="hidden" name="oa_settings_id" value="${settingsId}">
+              <input type="hidden" name="oa_hierarchy_id" value="${h.id}">
+              <button type="submit" class="btn-link-danger">Slet</button>
+            </form>
+          </td>
+        </tr>`;
+    }).join('');
+
+    // Matrix view (thresholds per hierarchy)
     const matrixHtml = hierarchies.map(h => {
       const cols = thresholds[h.id] || [];
-      const headerCells = cols.map(t => `<th class="matrix-col">${t.label || t.minAmount}</th>`).join('');
-      const bodyCells   = cols.map(t => `<td class="matrix-cell">${t.approver || '—'}</td>`).join('');
+      if (!cols.length) return '';
+      const headerCells = cols.map(t => `<th>${t.label || t.minAmount}</th>`).join('');
+      const bodyCells   = cols.map(t => `<td>${t.approver || '—'}</td>`).join('');
       return `
         <div class="hierarchy-block">
-          <div class="hierarchy-header">
-            <strong>${h.name}</strong>
-            <span class="badge ${h.status === 'Active' ? 'badge-green' : 'badge-grey'}">${h.status}</span>
-            <span class="muted">${h.recordType}</span>
-            ${h.highestOnly ? '<span class="badge badge-blue">Kun højeste</span>' : ''}
-          </div>
+          <div class="hierarchy-header"><strong>${h.name}</strong><span class="muted">${h.recordType}</span></div>
           <div class="table-scroll">
             <table class="matrix-table">
               <thead><tr><th>Godkender</th>${headerCells}</tr></thead>
@@ -190,7 +223,7 @@ define([
             </table>
           </div>
         </div>`;
-    }).join('') || '<p class="muted">Ingen hierarkier oprettet endnu.</p>';
+    }).join('');
 
     return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
       <div class="page-header">
@@ -280,12 +313,22 @@ define([
 
       <div class="card section">
         <div class="section-header">
-          <h2>Godkendelseshierarki / Matrix</h2>
+          <h2>Godkendelseshierarkier</h2>
+          ${settingsId !== 'new' ? `<a href="${newHierarchyUrl}" class="btn-primary" target="_blank">+ Tilføj hierarki</a>` : ''}
         </div>
-        ${matrixHtml}
-        <p class="muted" style="margin-top:16px;font-size:13px">
-          Hierarkier og tærskelværdier administreres direkte på custom records i NetSuite (customrecord_oa_hierarchy / customrecord_oa_threshold).
-        </p>
+        ${hierarchies.length ? `
+        <table class="data-table">
+          <thead><tr>
+            <th>Navn</th><th>Transaktionstype</th><th>Status</th><th>Kun højeste</th><th></th>
+          </tr></thead>
+          <tbody>${hierarchyRows}</tbody>
+        </table>
+        ${matrixHtml ? '<div style="margin-top:20px"><h3 style="font-size:14px;font-weight:600;color:#888;margin-bottom:12px">TÆRSKELMATRIX</h3>' + matrixHtml + '</div>' : ''}
+        ` : `
+        <div style="text-align:center;padding:32px 0">
+          <p class="muted" style="margin-bottom:16px">Ingen hierarkier oprettet endnu.</p>
+          ${settingsId !== 'new' ? `<a href="${newHierarchyUrl}" class="btn-primary" target="_blank">+ Tilføj første hierarki</a>` : '<p class="muted">Gem konfigurationen først for at tilføje hierarkier.</p>'}
+        </div>`}
       </div>`);
   }
 
@@ -325,6 +368,7 @@ define([
   .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px}
   h1{font-size:24px;font-weight:700;color:#312d2a}
   h2{font-size:16px;font-weight:600;color:#312d2a;margin-bottom:20px}
+  h3{font-size:14px;font-weight:600;color:#888;margin-bottom:12px}
   .subtitle{color:#888;font-size:14px;margin-top:4px}
   .card{background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:20px}
   .section{margin-bottom:20px}
@@ -332,7 +376,7 @@ define([
   .back-link:hover{color:#c74634}
   .data-table{width:100%;border-collapse:collapse}
   .data-table th{text-align:left;padding:10px 14px;font-size:12px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee}
-  .data-table td{padding:12px 14px;border-bottom:1px solid #f5f5f5;font-size:14px}
+  .data-table td{padding:12px 14px;border-bottom:1px solid #f5f5f5;font-size:14px;vertical-align:middle}
   .data-table tr:last-child td{border-bottom:none}
   .data-table tr:hover td{background:#fafafa}
   .empty{color:#bbb;text-align:center;padding:32px!important}
@@ -342,6 +386,8 @@ define([
   .badge-blue{background:#e3f2fd;color:#1565c0}
   .link{color:#c74634;text-decoration:none;font-weight:500}
   .link:hover{text-decoration:underline}
+  .btn-link-danger{background:none;border:none;padding:0;cursor:pointer;color:#c74634;font-weight:500;font-size:14px;font-family:inherit}
+  .btn-link-danger:hover{text-decoration:underline}
   .btn-primary{background:#c74634;color:#fff;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;border:none;cursor:pointer;display:inline-block}
   .btn-primary:hover{background:#b03d2e}
   .btn-secondary{background:#f5f5f5;color:#555;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;border:none;cursor:pointer;display:inline-block}
@@ -358,9 +404,9 @@ define([
   input:checked+.slider{background:#c74634}
   input:checked+.slider:before{transform:translateX(20px)}
   .form-actions{display:flex;justify-content:flex-end;gap:12px;margin-bottom:24px}
-  .muted{color:#aaa;font-size:13px}
   .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-  .hierarchy-block{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:16px}
+  .muted{color:#aaa;font-size:13px}
+  .hierarchy-block{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:12px}
   .hierarchy-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
   .table-scroll{overflow-x:auto}
   .matrix-table{width:100%;border-collapse:collapse;font-size:13px}
