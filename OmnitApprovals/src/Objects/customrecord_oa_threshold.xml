@@ -34,6 +34,12 @@
       <selectrecordtype>-4</selectrecordtype>
       <ismandatory>T</ismandatory>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oat_approver2">
+      <label>Approver 2</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oat_sort_order">
       <label>Sort Order</label>
       <fieldtype>INTEGER</fieldtype>

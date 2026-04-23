@@ -83,6 +83,7 @@ define([
         minAmount:  parseFloat(r.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT)) || 0,
         maxAmount:  r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT) ? parseFloat(r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT)) : Infinity,
         approver:   r.getValue(C.FIELDS.THRESHOLD.APPROVER),
+        approver2:  r.getValue(C.FIELDS.THRESHOLD.APPROVER2),
         sortOrder:  parseInt(r.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0
       });
       return true;
@@ -129,11 +130,16 @@ define([
         if (hierarchy.highestOnly) {
           // Use only the threshold with the highest minAmount
           const highest = matching.reduce((best, t) => t.minAmount > (best ? best.minAmount : -1) ? t : best, null);
-          if (highest) approver1 = highest.approver;
+          if (highest) {
+            approver1 = highest.approver;
+            if (approverCount >= 2) approver2 = highest.approver2 || null;
+          }
         } else {
-          // Sequential: use first two matching thresholds
-          if (matching[0]) approver1 = matching[0].approver;
-          if (matching[1] && approverCount >= 2) approver2 = matching[1].approver;
+          // Each threshold row carries both approvers
+          if (matching[0]) {
+            approver1 = matching[0].approver;
+            if (approverCount >= 2) approver2 = matching[0].approver2 || null;
+          }
         }
       }
     }

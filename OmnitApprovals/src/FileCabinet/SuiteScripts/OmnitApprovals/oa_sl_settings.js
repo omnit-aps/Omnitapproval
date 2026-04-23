@@ -39,17 +39,6 @@ define([
     const p       = req.parameters;
     const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
 
-    // Delete hierarchy action
-    if (p.oa_action === 'delete_hierarchy') {
-      try {
-        record.delete({ type: C.RECORDS.HIERARCHY, id: parseInt(p.oa_hierarchy_id, 10) });
-      } catch (e) {
-        log.error('OA Settings: delete hierarchy failed', e.message);
-      }
-      resp.write(`<script>window.location='${selfUrl}&oa_view=edit&oa_settings_id=${p.oa_settings_id}'</script>`);
-      return;
-    }
-
     // Save settings
     const settingsId = p.oa_settings_id;
     try {
@@ -60,8 +49,8 @@ define([
         rec = record.create({ type: C.RECORDS.SETTINGS, isDynamic: false });
       }
 
-      rec.setValue({ fieldId: 'name',                               value: 'OA Settings - ' + p.oa_subsidiary });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.SUBSIDIARY,        value: p.oa_subsidiary });
+      rec.setValue({ fieldId: 'name',                               value: 'OA Settings - ' + (p.oa_subsidiary_name || p.oa_subsidiary) });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.SUBSIDIARY,        value: parseInt(p.oa_subsidiary, 10) || '' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_PO,         value: p.oa_enable_po === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.ENABLE_VB,         value: p.oa_enable_vb === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVER_COUNT,    value: parseInt(p.oa_approver_count, 10) || 1 });
@@ -74,6 +63,7 @@ define([
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
       const savedId = rec.save();
 
+      saveMatrixRows(savedId, p);
       resp.write(`<script>window.location='${selfUrl}&oa_view=edit&oa_settings_id=${savedId}&oa_saved=1'</script>`);
     } catch (e) {
       resp.write(renderError(e.message, selfUrl));
@@ -131,8 +121,7 @@ define([
 
   function renderEditPage(settingsId, selfUrl) {
     let s = {};
-    let hierarchies = [];
-    let thresholds  = {};
+    let matrixRows = [];
 
     if (settingsId !== 'new') {
       try {
@@ -143,87 +132,48 @@ define([
         search.create({
           type:    C.RECORDS.HIERARCHY,
           filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
-          columns: Object.values(C.FIELDS.HIERARCHY)
-        }).run().each(r => {
-          hierarchies.push({
-            id:          r.id,
-            name:        r.getValue(C.FIELDS.HIERARCHY.NAME) || '—',
-            recordType:  r.getText(C.FIELDS.HIERARCHY.RECORD_TYPE) || '—',
-            status:      r.getText(C.FIELDS.HIERARCHY.STATUS) || '—',
-            highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)
-          });
-          thresholds[r.id] = [];
-          return true;
-        });
-
-        if (hierarchies.length) {
+          columns: ['internalid']
+        }).run().each(hr => {
           search.create({
             type:    C.RECORDS.THRESHOLD,
-            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchies.map(h => h.id)]],
-            columns: Object.values(C.FIELDS.THRESHOLD)
-          }).run().each(r => {
-            const hId = r.getValue(C.FIELDS.THRESHOLD.HIERARCHY);
-            if (thresholds[hId]) {
-              thresholds[hId].push({
-                id:        r.id,
-                label:     r.getValue(C.FIELDS.THRESHOLD.LABEL),
-                minAmount: r.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT),
-                maxAmount: r.getValue(C.FIELDS.THRESHOLD.MAX_AMOUNT),
-                approver:  r.getText(C.FIELDS.THRESHOLD.APPROVER),
-                sortOrder: r.getValue(C.FIELDS.THRESHOLD.SORT_ORDER)
-              });
-            }
+            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hr.id]],
+            columns: ['internalid', C.FIELDS.THRESHOLD.MIN_AMOUNT, C.FIELDS.THRESHOLD.APPROVER, C.FIELDS.THRESHOLD.APPROVER2, C.FIELDS.THRESHOLD.SORT_ORDER]
+          }).run().each(t => {
+            matrixRows.push({
+              id:        t.id,
+              minAmount: t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || '0',
+              approver1: t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || '',
+              approver2: t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || ''
+            });
             return true;
           });
-        }
+          return false;
+        });
+        matrixRows.sort((a, b) => parseFloat(a.minAmount) - parseFloat(b.minAmount));
       } catch (e) {
         return renderError(`Konfiguration med ID ${settingsId} ikke fundet.`, selfUrl);
       }
     }
 
-    // Build URLs for hierarchy management
-    const newHierarchyUrl = settingsId !== 'new'
-      ? url.resolveRecord({ recordType: C.RECORDS.HIERARCHY, isEditMode: true }) + '&custrecord_oah_settings=' + settingsId
-      : '#';
+    // Pre-build employee options HTML for client-side new rows
+    const empOpts = ['<option value="">— Vælg medarbejder —</option>'];
+    search.create({
+      type:    'employee',
+      filters: [['isinactive', 'is', 'F']],
+      columns: ['internalid', 'entityid']
+    }).run().each(r => {
+      empOpts.push(`<option value="${r.id}">${r.getValue('entityid').replace(/"/g, '&quot;')}</option>`);
+      return true;
+    });
+    const empOptsJson = JSON.stringify(empOpts.join(''));
 
-    const hierarchyRows = hierarchies.map(h => {
-      const editUrl = url.resolveRecord({ recordType: C.RECORDS.HIERARCHY, recordId: h.id, isEditMode: true });
-      return `
-        <tr>
-          <td><strong>${h.name}</strong></td>
-          <td>${h.recordType}</td>
-          <td><span class="badge ${h.status === 'Aktiv' || h.status === 'Active' ? 'badge-green' : 'badge-grey'}">${h.status}</span></td>
-          <td>${h.highestOnly ? 'Ja' : 'Nej'}</td>
-          <td>
-            <a href="${editUrl}" class="link" target="_blank">Rediger</a>
-            &nbsp;·&nbsp;
-            <form method="POST" action="${selfUrl}" style="display:inline" onsubmit="return confirm('Slet dette hierarki?')">
-              <input type="hidden" name="oa_action" value="delete_hierarchy">
-              <input type="hidden" name="oa_settings_id" value="${settingsId}">
-              <input type="hidden" name="oa_hierarchy_id" value="${h.id}">
-              <button type="submit" class="btn-link-danger">Slet</button>
-            </form>
-          </td>
-        </tr>`;
-    }).join('');
-
-    // Matrix view (thresholds per hierarchy)
-    const matrixHtml = hierarchies.map(h => {
-      const cols = thresholds[h.id] || [];
-      if (!cols.length) return '';
-      const headerCells = cols.map(t => `<th>${t.label || t.minAmount}</th>`).join('');
-      const bodyCells   = cols.map(t => `<td>${t.approver || '—'}</td>`).join('');
-      return `
-        <div class="hierarchy-block">
-          <div class="hierarchy-header"><strong>${h.name}</strong><span class="muted">${h.recordType}</span></div>
-          <div class="table-scroll">
-            <table class="matrix-table">
-              <thead><tr><th>Godkender</th>${headerCells}</tr></thead>
-              <tbody><tr><td class="muted">Tærskelværdier</td>${bodyCells}</tr></tbody>
-            </table>
-          </div>
-        </div>`;
-    }).join('');
+    const rowsHtml = matrixRows.map((row, i) => `
+      <tr data-row="${i}">
+        <td><input type="number" name="row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
+        <td>${employeeSelect('row_' + i + '_approver1', row.approver1)}</td>
+        <td>${employeeSelect('row_' + i + '_approver2', row.approver2)}</td>
+        <td><input type="hidden" name="row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this)">Slet</button></td>
+      </tr>`).join('');
 
     return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
       <div class="page-header">
@@ -233,15 +183,17 @@ define([
         </div>
       </div>
 
-      <form method="POST" action="${selfUrl}">
+      <form method="POST" action="${selfUrl}" onsubmit="syncRowCount()">
         <input type="hidden" name="oa_settings_id" value="${settingsId}">
+        <input type="hidden" name="oa_subsidiary_name" id="oa_subsidiary_name" value="${s.subsidiary_text || ''}">
+        <input type="hidden" name="row_count" id="row_count" value="${matrixRows.length}">
 
         <div class="card section">
           <h2>Generelle indstillinger</h2>
           <div class="form-grid">
             <div class="form-group">
               <label>Subsidiary *</label>
-              <input type="text" name="oa_subsidiary" value="${s.subsidiary || ''}" placeholder="Subsidiary intern ID" required>
+              ${subsidiarySelect('oa_subsidiary', s.subsidiary)}
             </div>
             <div class="form-group">
               <label>Antal godkendere</label>
@@ -313,23 +265,64 @@ define([
 
       <div class="card section">
         <div class="section-header">
-          <h2>Godkendelseshierarkier</h2>
-          ${settingsId !== 'new' ? `<a href="${newHierarchyUrl}" class="btn-primary" target="_blank">+ Tilføj hierarki</a>` : ''}
+          <div>
+            <h2 style="margin-bottom:4px">Godkendelsesmatrix</h2>
+            <p class="muted">Regler sorteres efter beløbsgrænse. Godkender 2 kræver "To trin".</p>
+          </div>
+          <button type="button" class="btn-primary" onclick="addRow()">+ Tilføj regel</button>
         </div>
-        ${hierarchies.length ? `
-        <table class="data-table">
-          <thead><tr>
-            <th>Navn</th><th>Transaktionstype</th><th>Status</th><th>Kun højeste</th><th></th>
-          </tr></thead>
-          <tbody>${hierarchyRows}</tbody>
-        </table>
-        ${matrixHtml ? '<div style="margin-top:20px"><h3 style="font-size:14px;font-weight:600;color:#888;margin-bottom:12px">TÆRSKELMATRIX</h3>' + matrixHtml + '</div>' : ''}
-        ` : `
-        <div style="text-align:center;padding:32px 0">
-          <p class="muted" style="margin-bottom:16px">Ingen hierarkier oprettet endnu.</p>
-          ${settingsId !== 'new' ? `<a href="${newHierarchyUrl}" class="btn-primary" target="_blank">+ Tilføj første hierarki</a>` : '<p class="muted">Gem konfigurationen først for at tilføje hierarkier.</p>'}
-        </div>`}
-      </div>`);
+        <div class="table-scroll">
+          <table class="data-table" id="matrix-table">
+            <thead><tr>
+              <th style="width:150px">Beløb fra</th>
+              <th>Godkender 1</th>
+              <th>Godkender 2 <span style="font-weight:normal;color:#aaa">(valgfri)</span></th>
+              <th style="width:60px"></th>
+            </tr></thead>
+            <tbody id="matrix-body">${rowsHtml}</tbody>
+          </table>
+        </div>
+        ${matrixRows.length === 0 ? '<p id="empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>' : ''}
+      </div>
+
+      <script>
+      var _rowCounter = ${matrixRows.length};
+      var _empOptions = ${empOptsJson};
+      function addRow() {
+        var i = _rowCounter++;
+        var em = document.getElementById('empty-msg');
+        if (em) em.style.display = 'none';
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-row', i);
+        tr.innerHTML =
+          '<td><input type="number" name="row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>' +
+          '<td><select name="row_' + i + '_approver1">' + _empOptions + '</select></td>' +
+          '<td><select name="row_' + i + '_approver2">' + _empOptions + '</select></td>' +
+          '<td><input type="hidden" name="row_' + i + '_id" value="new">' +
+              '<button type="button" class="btn-link-danger" onclick="deleteRow(this)">Slet</button></td>';
+        document.getElementById('matrix-body').appendChild(tr);
+      }
+      function deleteRow(btn) {
+        btn.closest('tr').remove();
+        reindexRows();
+      }
+      function reindexRows() {
+        var rows = document.querySelectorAll('#matrix-body tr');
+        rows.forEach(function(tr, idx) {
+          tr.setAttribute('data-row', idx);
+          tr.querySelectorAll('input[name], select[name]').forEach(function(el) {
+            el.name = el.name.replace(/^row_\d+_/, 'row_' + idx + '_');
+          });
+        });
+        document.getElementById('row_count').value = rows.length;
+      }
+      function syncRowCount() { reindexRows(); }
+      var subSel = document.querySelector('[name="oa_subsidiary"]');
+      if (subSel) subSel.addEventListener('change', function() {
+        var opt = this.options[this.selectedIndex];
+        document.getElementById('oa_subsidiary_name').value = opt ? opt.text : '';
+      });
+      </script>`);
   }
 
   // ─── Employee dropdown helper ─────────────────────────────────────────────────
@@ -346,6 +339,112 @@ define([
       return true;
     });
     return `<select name="${fieldName}">${opts.join('')}</select>`;
+  }
+
+  // ─── Subsidiary dropdown helper ───────────────────────────────────────────────
+
+  function subsidiarySelect(fieldName, selectedId) {
+    const opts = ['<option value="">— Vælg subsidiary —</option>'];
+    try {
+      search.create({
+        type:    'subsidiary',
+        columns: ['internalid', 'name']
+      }).run().each(r => {
+        const sel = String(r.id) === String(selectedId) ? ' selected' : '';
+        opts.push(`<option value="${r.id}"${sel}>${r.getValue('name')}</option>`);
+        return true;
+      });
+    } catch (e) {
+      if (selectedId) opts.push(`<option value="${selectedId}" selected>${selectedId}</option>`);
+    }
+    return `<select name="${fieldName}" required>${opts.join('')}</select>`;
+  }
+
+  // ─── Matrix save helper ───────────────────────────────────────────────────────
+
+  function saveMatrixRows(settingsId, p) {
+    const rowCount = parseInt(p.row_count, 10) || 0;
+
+    let hierarchyId = null;
+    search.create({
+      type:    C.RECORDS.HIERARCHY,
+      filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
+      columns: ['internalid']
+    }).run().each(r => { hierarchyId = parseInt(r.id, 10); return false; });
+
+    if (rowCount === 0) {
+      if (hierarchyId) {
+        search.create({
+          type:    C.RECORDS.THRESHOLD,
+          filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchyId]],
+          columns: ['internalid']
+        }).run().each(t => {
+          try { record.delete({ type: C.RECORDS.THRESHOLD, id: parseInt(t.id, 10) }); } catch (e) {}
+          return true;
+        });
+      }
+      return;
+    }
+
+    if (!hierarchyId) {
+      const h = record.create({ type: C.RECORDS.HIERARCHY, isDynamic: false });
+      h.setValue({ fieldId: 'name',                          value: 'Auto' });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.SETTINGS,     value: settingsId });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.STATUS,       value: C.HIERARCHY_STATUS.ACTIVE });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.RECORD_TYPE,  value: C.HIERARCHY_RECORD_TYPES.BOTH });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.HIGHEST_ONLY, value: false });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.START_DATE,   value: new Date() });
+      hierarchyId = h.save();
+    }
+
+    const existingIds = [];
+    search.create({
+      type:    C.RECORDS.THRESHOLD,
+      filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchyId]],
+      columns: ['internalid']
+    }).run().each(r => { existingIds.push(parseInt(r.id, 10)); return true; });
+
+    const submittedIds = [];
+    for (let i = 0; i < rowCount; i++) {
+      const rowId        = p[`row_${i}_id`];
+      const rowMin       = parseFloat(p[`row_${i}_min`]) || 0;
+      const rowApprover1 = parseInt(p[`row_${i}_approver1`], 10) || null;
+      const rowApprover2 = parseInt(p[`row_${i}_approver2`], 10) || null;
+
+      if (!rowApprover1) continue;
+
+      let rowMax = null;
+      for (let j = i + 1; j < rowCount; j++) {
+        const nextA1  = parseInt(p[`row_${j}_approver1`], 10);
+        const nextMin = parseFloat(p[`row_${j}_min`]);
+        if (nextA1 && !isNaN(nextMin)) { rowMax = nextMin - 0.01; break; }
+      }
+
+      let t;
+      if (rowId && rowId !== 'new') {
+        const parsedId = parseInt(rowId, 10);
+        t = record.load({ type: C.RECORDS.THRESHOLD, id: parsedId, isDynamic: false });
+        submittedIds.push(parsedId);
+      } else {
+        t = record.create({ type: C.RECORDS.THRESHOLD, isDynamic: false });
+        t.setValue({ fieldId: 'name', value: 'Tærskel ' + (i + 1) });
+      }
+
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.HIERARCHY,  value: hierarchyId });
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.MIN_AMOUNT, value: rowMin });
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.MAX_AMOUNT, value: rowMax !== null ? rowMax : '' });
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.APPROVER,   value: rowApprover1 });
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.APPROVER2,  value: rowApprover2 || '' });
+      t.setValue({ fieldId: C.FIELDS.THRESHOLD.SORT_ORDER, value: (i + 1) * 10 });
+      const tSavedId = t.save();
+      if (!rowId || rowId === 'new') submittedIds.push(tSavedId);
+    }
+
+    existingIds.forEach(id => {
+      if (!submittedIds.includes(id)) {
+        try { record.delete({ type: C.RECORDS.THRESHOLD, id }); } catch (e) {}
+      }
+    });
   }
 
   // ─── Shell / CSS ─────────────────────────────────────────────────────────────
@@ -406,14 +505,10 @@ define([
   .form-actions{display:flex;justify-content:flex-end;gap:12px;margin-bottom:24px}
   .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
   .muted{color:#aaa;font-size:13px}
-  .hierarchy-block{border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:12px}
-  .hierarchy-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
   .table-scroll{overflow-x:auto}
-  .matrix-table{width:100%;border-collapse:collapse;font-size:13px}
-  .matrix-table th{background:#f8f8f8;padding:8px 14px;text-align:center;border:1px solid #eee;font-weight:600;font-size:12px}
-  .matrix-table th:first-child{text-align:left}
-  .matrix-table td{padding:8px 14px;text-align:center;border:1px solid #eee}
-  .matrix-table td:first-child{text-align:left;font-weight:500}
+  #matrix-body select{width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit}
+  #matrix-body select:focus{border-color:#c74634;outline:none}
+  .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
 </style>
 </head>
 <body>

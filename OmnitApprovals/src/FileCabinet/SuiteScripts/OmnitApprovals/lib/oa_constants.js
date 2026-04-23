@@ -43,6 +43,7 @@ define([], () => {
         MIN_AMOUNT: 'custrecord_oat_min_amount',
         MAX_AMOUNT: 'custrecord_oat_max_amount',
         APPROVER:   'custrecord_oat_approver',
+        APPROVER2:  'custrecord_oat_approver2',
         SORT_ORDER: 'custrecord_oat_sort_order'
       },
       LOG: {
