@@ -137,7 +137,7 @@ define([
             filters: [
               [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
               'AND',
-              [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', recordType]
+              [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',    recordType]
             ],
             columns: ['internalid']
           }).run().each(hr => {
@@ -425,7 +425,7 @@ define([
       filters: [
         [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
         'AND',
-        [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', recordType]
+        [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',    recordType]
       ],
       columns: ['internalid']
     }).run().each(r => { hierarchyId = parseInt(r.id, 10); return false; });

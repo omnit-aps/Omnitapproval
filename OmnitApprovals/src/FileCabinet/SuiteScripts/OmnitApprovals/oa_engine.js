@@ -44,9 +44,9 @@ define([
     const filters = [
       [C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId],
       'AND',
-      [C.FIELDS.HIERARCHY.STATUS, 'anyof', C.HIERARCHY_STATUS.ACTIVE],
+      [C.FIELDS.HIERARCHY.STATUS, 'is', C.HIERARCHY_STATUS.ACTIVE],
       'AND',
-      [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', validTypes],
+      [[C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[0]], 'OR', [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[1]]],
       'AND',
       [C.FIELDS.HIERARCHY.START_DATE, 'onorbefore', 'today'],
       'AND',
