@@ -2,6 +2,5 @@
 <customcenterlink scriptid="custcenterlink_oa_dashboard">
   <label>Bulk Approval Dashboard</label>
   <centertab>[custcentertab_oa]</centertab>
-  <shortcut>F</shortcut>
   <url>/app/site/hosting/scriptlet.nl?script=customscript_oa_sl_dashboard&amp;deploy=customdeploy_oa_sl_dashboard</url>
 </customcenterlink>
