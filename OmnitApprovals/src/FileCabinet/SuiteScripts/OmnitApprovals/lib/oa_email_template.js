@@ -7,8 +7,16 @@ define([], () => {
 
   function buildApprovalEmail(p) {
     const recordLabel = p.recordType === 'purchaseorder' ? 'Purchase Order' : 'Vendor Bill';
+    const introText   = p.introText
+      || 'A new {recordType} from {subsidiary} has been entered in NetSuite and requires your approval. Please see the attached document for full details.';
+    const intro = introText
+      .replace('{recordType}', recordLabel)
+      .replace('{subsidiary}', p.subsidiaryName || '')
+      .replace('{docNumber}',  p.documentNumber || '')
+      .replace('{requester}',  p.requesterName  || '');
+
     return `<!DOCTYPE html>
-<html lang="da">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -46,30 +54,30 @@ define([], () => {
     <div class="logo-sub">Omnit Approvals</div>
   </div>
   <div class="body">
-    <h1>Hej ${p.approverName},</h1>
-    <p class="sub">Vi har behov for din godkendelse</p>
-    <p>En ny <strong>${recordLabel}</strong> fra <strong>${p.subsidiaryName}</strong> er blevet indtastet i NetSuite og mangler din godkendelse. Se vedh&aelig;ftet bilag for alle detaljer.</p>
+    <h1>Hi ${p.approverName},</h1>
+    <p class="sub">Your approval is required</p>
+    <p>${intro}</p>
     <div class="meta">
-      <div class="row"><span class="lbl">Dokumentnummer</span><span class="val">${p.documentNumber}</span></div>
+      <div class="row"><span class="lbl">Document number</span><span class="val">${p.documentNumber}</span></div>
       <div class="row"><span class="lbl">Type</span><span class="val">${recordLabel}</span></div>
-      <div class="row"><span class="lbl">Bel&oslash;b</span><span class="val">${p.currency} ${p.amount}</span></div>
-      <div class="row"><span class="lbl">Oprettet af</span><span class="val">${p.requesterName}</span></div>
+      <div class="row"><span class="lbl">Amount</span><span class="val">${p.currency} ${p.amount}</span></div>
+      <div class="row"><span class="lbl">Submitted by</span><span class="val">${p.requesterName}</span></div>
       <div class="row"><span class="lbl">Subsidiary</span><span class="val">${p.subsidiaryName}</span></div>
     </div>
-    <p>Venligst angiv om transaktionen skal godkendes eller afvises s&aring; hurtigt som muligt.</p>
+    <p>Please approve or reject this transaction as soon as possible.</p>
     <div class="btns">
-      <a href="${p.declineUrl}" class="btn btn-decline">${p.declineLabel || 'Afvis'}</a>
-      <a href="${p.approveUrl}" class="btn btn-approve">${p.approveLabel || 'Godkend'}</a>
+      <a href="${p.declineUrl}" class="btn btn-decline">${p.declineLabel || 'Reject'}</a>
+      <a href="${p.approveUrl}" class="btn btn-approve">${p.approveLabel || 'Approve'}</a>
     </div>
     <hr>
     <div class="faq">
-      <strong>Hvorfor f&aring;r jeg denne email?</strong><br>
-      Du er registreret som godkender for ${p.subsidiaryName} i Omnit Approvals.<br><br>
-      <strong>Godkendelse via NetSuite:</strong> Log ind og &aring;bn Omnit Approvals dashboardet for at behandle ventende transaktioner samlet.
+      <strong>Why am I receiving this email?</strong><br>
+      You are registered as an approver for ${p.subsidiaryName} in Omnit Approvals.<br><br>
+      <strong>Approve via NetSuite:</strong> Log in and open the Omnit Approvals dashboard to process pending transactions in bulk.
     </div>
   </div>
   <div class="ftr">
-    Sp&oslash;rgsm&aring;l? Kontakt bogholderiteamet eller <a href="mailto:${p.supportEmail || 'support@omnit.dk'}">${p.supportEmail || 'support@omnit.dk'}</a>
+    Questions? Contact the accounting team or <a href="mailto:${p.supportEmail || 'support@omnit.dk'}">${p.supportEmail || 'support@omnit.dk'}</a>
   </div>
 </div>
 </body></html>`;
@@ -77,10 +85,10 @@ define([], () => {
 
   function buildDeclineCommentPage(p) {
     return `<!DOCTYPE html>
-<html lang="da">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Afvis transaktion</title>
+<title>Reject transaction</title>
 <style>
   body{margin:0;padding:40px;background:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#312d2a}
   .card{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:40px;box-shadow:0 2px 16px rgba(0,0,0,.09)}
@@ -94,17 +102,17 @@ define([], () => {
 </head>
 <body>
 <div class="card">
-  <h2>Afvis transaktion</h2>
+  <h2>Reject transaction</h2>
   <p class="sub">${p.documentNumber} &mdash; ${p.subsidiaryName}</p>
-  <div class="doc">Bel&oslash;b: <strong>${p.currency} ${p.amount}</strong></div>
+  <div class="doc">Amount: <strong>${p.currency} ${p.amount}</strong></div>
   <form method="POST" action="${p.actionUrl}">
     <input type="hidden" name="oa_token" value="${p.token}">
     <input type="hidden" name="oa_action" value="decline">
     <input type="hidden" name="oa_record_type" value="${p.recordType}">
     <input type="hidden" name="oa_record_id" value="${p.recordId}">
-    <label for="comment">&Aring;rsag til afvisning (p&aring;kr&aelig;vet):</label>
-    <textarea id="comment" name="oa_comment" required placeholder="Beskriv hvorfor du afviser denne transaktion..."></textarea>
-    <button type="submit" class="btn">Bekr&aelig;ft afvisning</button>
+    <label for="comment">Reason for rejection (required):</label>
+    <textarea id="comment" name="oa_comment" required placeholder="Describe why you are rejecting this transaction..."></textarea>
+    <button type="submit" class="btn">Confirm rejection</button>
   </form>
 </div>
 </body></html>`;
@@ -113,8 +121,8 @@ define([], () => {
   function buildConfirmationPage(action) {
     const approved = action === 'approve';
     return `<!DOCTYPE html>
-<html lang="da">
-<head><meta charset="UTF-8"><title>${approved ? 'Godkendt' : 'Afvist'}</title>
+<html lang="en">
+<head><meta charset="UTF-8"><title>${approved ? 'Approved' : 'Rejected'}</title>
 <style>
   body{margin:0;padding:40px;background:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:80vh}
   .card{background:#fff;border-radius:12px;padding:48px 40px;text-align:center;box-shadow:0 2px 16px rgba(0,0,0,.09);max-width:400px}
@@ -124,8 +132,8 @@ define([], () => {
 </style></head>
 <body><div class="card">
   <div class="icon">${approved ? '✓' : '✗'}</div>
-  <h2>Transaktion ${approved ? 'godkendt' : 'afvist'}</h2>
-  <p>Du kan nu lukke dette vindue.</p>
+  <h2>Transaction ${approved ? 'approved' : 'rejected'}</h2>
+  <p>You can now close this window.</p>
 </div></body></html>`;
   }
 

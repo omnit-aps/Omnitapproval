@@ -53,13 +53,13 @@
       <label>Approve Button Label</label>
       <fieldtype>TEXT</fieldtype>
       <ismandatory>F</ismandatory>
-      <defaultvalue>Godkend</defaultvalue>
+      <defaultvalue>Approve</defaultvalue>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_reject_string">
       <label>Reject Button Label</label>
       <fieldtype>TEXT</fieldtype>
       <ismandatory>F</ismandatory>
-      <defaultvalue>Afvis</defaultvalue>
+      <defaultvalue>Reject</defaultvalue>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_email_enabled">
       <label>Enable Email Approval</label>
@@ -72,6 +72,24 @@
       <fieldtype>INTEGER</fieldtype>
       <ismandatory>F</ismandatory>
       <defaultvalue>7</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_email_sender">
+      <label>Email Sender (From)</label>
+      <fieldtype>SELECT</fieldtype>
+      <selectrecordtype>-4</selectrecordtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_email_subject">
+      <label>Email Subject</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>Approval required — {docNumber}</defaultvalue>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_email_intro">
+      <label>Email Intro Text</label>
+      <fieldtype>LONGTEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>A new {recordType} from {subsidiary} has been entered in NetSuite and requires your approval. Please see the attached document for full details.</defaultvalue>
     </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>

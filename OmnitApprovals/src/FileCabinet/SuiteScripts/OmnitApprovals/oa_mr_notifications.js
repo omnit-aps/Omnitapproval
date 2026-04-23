@@ -17,7 +17,6 @@ define([
 ], (email, record, render, runtime, search, url, C, utils, tpl, engine) => {
   'use strict';
 
-  // Script parameters passed from the scheduling UE
   const PARAM_RECORD_ID   = 'custscript_oa_mr_record_id';
   const PARAM_RECORD_TYPE = 'custscript_oa_mr_record_type';
   const PARAM_RAW_TOKEN   = 'custscript_oa_mr_raw_token';
@@ -31,8 +30,6 @@ define([
       return [{ recordId, recordType }];
     }
 
-    // Fallback: find all pending transactions with no notification sent yet
-    // (for bulk re-notification scenarios)
     const results = [];
     search.create({
       type:    'transaction',
@@ -81,39 +78,49 @@ define([
 
       if (fields['approvalstatus'] !== C.APPROVAL_STATUS.PENDING) return;
 
-      const step            = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
-      const approverId      = step === 1
+      const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
+
+      // SELECT fields from lookupFields return arrays — extract the scalar value
+      const approverRaw = step === 1
         ? fields[C.FIELDS.TRANSACTION.APPROVER1]
         : fields[C.FIELDS.TRANSACTION.APPROVER2];
-      const submittedBy     = fields[C.FIELDS.TRANSACTION.SUBMITTED_BY];
-      const subsidiaryId    = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].value : null;
-      const subsidiaryName  = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text : '';
-      const documentNumber  = fields['tranid'];
-      const amount          = parseFloat(fields['amount']) || 0;
-      const currencySymbol  = fields['currencysymbol'] || '';
+      const approverId = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : approverRaw;
+
+      const submittedByRaw = fields[C.FIELDS.TRANSACTION.SUBMITTED_BY];
+      const submittedById  = Array.isArray(submittedByRaw) && submittedByRaw[0] ? submittedByRaw[0].value : submittedByRaw;
+
+      const subsidiaryId   = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].value : null;
+      const subsidiaryName = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text  : '';
+      const documentNumber = fields['tranid'];
+      const amount         = parseFloat(fields['amount']) || 0;
+      const currencySymbol = fields['currencysymbol'] || '';
 
       if (!approverId) return;
 
       const useEmail = utils.lookupEmployeeField(approverId, C.FIELDS.EMPLOYEE.USE_EMAIL);
-      if (!useEmail) return; // Only send email to employees with email approval enabled
+      if (!useEmail) return;
 
       const approverLookup = search.lookupFields({ type: 'employee', id: approverId, columns: ['firstname', 'lastname', 'email'] });
       const approverName   = `${approverLookup.firstname || ''} ${approverLookup.lastname || ''}`.trim();
       const approverEmail  = approverLookup.email;
-
       if (!approverEmail) return;
 
-      const requesterLookup = submittedBy
-        ? search.lookupFields({ type: 'employee', id: submittedBy, columns: ['firstname', 'lastname'] })
+      const requesterLookup = submittedById
+        ? search.lookupFields({ type: 'employee', id: submittedById, columns: ['firstname', 'lastname'] })
         : {};
       const requesterName = `${requesterLookup.firstname || ''} ${requesterLookup.lastname || ''}`.trim() || 'System';
 
-      const settings    = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
-      const approveLabel = (settings && settings.approve_string) || 'Godkend';
-      const declineLabel = (settings && settings.reject_string)  || 'Afvis';
-      const supportEmail = (settings && settings.support_email)  || 'support@omnit.dk';
+      const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
+      const approveLabel = (settings && settings.approve_string) || 'Approve';
+      const declineLabel = (settings && settings.reject_string)  || 'Reject';
+      const supportEmail = (settings && settings.support_email)  || '';
+      const emailSubject = ((settings && settings.email_subject) || 'Approval required — {docNumber}')
+        .replace('{docNumber}', documentNumber);
+      const emailIntro   = (settings && settings.email_intro) || '';
 
-      // Retrieve raw token from script params (only available on first run per transaction)
+      // Sender: use the configured sender employee if set, otherwise the scheduling user
+      const senderEmployeeId = (settings && settings.email_sender) || runtime.getCurrentUser().id;
+
       const rawToken = runtime.getCurrentScript().getParameter({ name: PARAM_RAW_TOKEN }) || '';
 
       const slUrl = url.resolveScript({
@@ -131,17 +138,17 @@ define([
         subsidiaryName,
         recordType,
         documentNumber,
-        amount:       amount.toLocaleString('da-DK', { minimumFractionDigits: 2 }),
+        amount:       amount.toLocaleString('en-US', { minimumFractionDigits: 2 }),
         currency:     currencySymbol,
         requesterName,
         approveUrl,
         declineUrl,
         approveLabel,
         declineLabel,
-        supportEmail
+        supportEmail,
+        introText:    emailIntro
       });
 
-      // Render PDF of the transaction
       let pdfFile = null;
       try {
         pdfFile = render.transaction({ entityId: parseInt(recordId, 10), printMode: render.PrintMode.PDF });
@@ -150,11 +157,11 @@ define([
       }
 
       const emailParams = {
-        author:    runtime.getCurrentUser().id,
+        author:     senderEmployeeId,
         recipients: [approverEmail],
-        subject:   `Godkendelsesanmodning — ${documentNumber}`,
-        body:      htmlBody,
-        isHtml:    true
+        subject:    emailSubject,
+        body:       htmlBody,
+        isHtml:     true
       };
       if (pdfFile) emailParams.attachments = [pdfFile];
 
@@ -174,7 +181,7 @@ define([
       log.error('OA MR reduce error', `Key: ${key} | ${error}`);
       return true;
     });
-    log.audit('OA MR complete', `Processed: ${summary.reduceSummary.keys.iterator().count || 0} records`);
+    log.audit('OA MR complete', `Processed ${summary.reduceSummary.keys.iterator().count || 0} records`);
   }
 
   return { getInputData, map, reduce, summarize };

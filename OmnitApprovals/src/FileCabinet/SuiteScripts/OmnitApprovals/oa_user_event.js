@@ -114,8 +114,8 @@ define([
     // Load button labels from settings
     const subsidiaryId = utils.getTransactionSubsidiary(rec.type, rec.id);
     const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
-    const approveLabel = (settings && settings.approve_string) || 'Godkend';
-    const rejectLabel  = (settings && settings.reject_string)  || 'Afvis';
+    const approveLabel = (settings && settings.approve_string) || 'Approve';
+    const rejectLabel  = (settings && settings.reject_string)  || 'Reject';
 
     const slUrl = url.resolveScript({
       scriptId:     'customscript_oa_sl_email_action',
@@ -127,13 +127,13 @@ define([
       form.addButton({ id: 'custpage_oa_approve', label: approveLabel, functionName: `OA_approve('${slUrl}')` });
       form.addButton({ id: 'custpage_oa_decline', label: rejectLabel,  functionName: `OA_decline('${slUrl}')` });
       if (canDelegate) {
-        form.addButton({ id: 'custpage_oa_delegate', label: 'Delegér', functionName: `OA_delegate('${slUrl}')` });
+        form.addButton({ id: 'custpage_oa_delegate', label: 'Delegate', functionName: `OA_delegate('${slUrl}')` });
       }
     }
 
     if (isManager) {
-      form.addButton({ id: 'custpage_oa_reset',    label: 'Nulstil flow',  functionName: `OA_reset('${slUrl}')` });
-      form.addButton({ id: 'custpage_oa_reassign', label: 'Omfordel',      functionName: `OA_reassign('${slUrl}')` });
+      form.addButton({ id: 'custpage_oa_reset',    label: 'Reset flow',  functionName: `OA_reset('${slUrl}')` });
+      form.addButton({ id: 'custpage_oa_reassign', label: 'Reassign',    functionName: `OA_reassign('${slUrl}')` });
     }
   }
 

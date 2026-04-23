@@ -36,7 +36,6 @@ define([
 
   function handleBatchPost(req, resp) {
     const userId  = runtime.getCurrentUser().id;
-    const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_dashboard', deploymentId: 'customdeploy_oa_sl_dashboard', returnExternalUrl: false });
     const body    = JSON.parse(req.body || '{}');
     const actions = body.actions || [];
 
@@ -46,9 +45,9 @@ define([
         if (a.action === 'approve') {
           result = engine.processApproval(a.recordId, a.recordType, userId, parseInt(a.step, 10) || 1);
         } else if (a.action === 'decline') {
-          result = engine.processDecline(a.recordId, a.recordType, userId, a.comment || 'Afvist via dashboard');
+          result = engine.processDecline(a.recordId, a.recordType, userId, a.comment || 'Rejected via dashboard');
         } else {
-          result = { success: false, message: 'Ukendt handling' };
+          result = { success: false, message: 'Unknown action' };
         }
         return { recordId: a.recordId, ...result };
       } catch (e) {
@@ -68,7 +67,7 @@ define([
     const statusMap = { pending: C.APPROVAL_STATUS.PENDING, approved: C.APPROVAL_STATUS.APPROVED, rejected: C.APPROVAL_STATUS.REJECTED };
     const approvalStatuses = statusFilter === 'all' ? Object.values(C.APPROVAL_STATUS) : [statusMap[statusFilter] || C.APPROVAL_STATUS.PENDING];
 
-    const typeMap = { po: 'PurchOrd', vb: 'VendBill' };
+    const typeMap  = { po: 'PurchOrd', vb: 'VendBill' };
     const txnTypes = typeFilter === 'all' ? ['PurchOrd', 'VendBill'] : [typeMap[typeFilter]].filter(Boolean);
 
     const filters = [
@@ -77,12 +76,11 @@ define([
       ['approvalstatus', 'anyof', approvalStatuses]
     ];
 
-    // Non-managers only see transactions assigned to them
     if (!isManager) {
       filters.push('AND', [
-        [`${C.FIELDS.TRANSACTION.APPROVER1}`, 'anyof', [userId]],
+        [C.FIELDS.TRANSACTION.APPROVER1, 'anyof', [userId]],
         'OR',
-        [`${C.FIELDS.TRANSACTION.APPROVER2}`, 'anyof', [userId]]
+        [C.FIELDS.TRANSACTION.APPROVER2, 'anyof', [userId]]
       ]);
     }
 
@@ -102,21 +100,23 @@ define([
     }).run().each(r => {
       const approvalStatus = r.getValue('approvalstatus');
       rows.push({
-        id:           r.id,
-        type:         r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill',
-        typeLabel:    r.getValue('type') === 'PurchOrd' ? 'Purchase Order' : 'Vendor Bill',
-        tranid:       r.getValue('tranid'),
-        entity:       r.getText('entity'),
-        currency:     r.getText('currency'),
-        subsidiary:   r.getText('subsidiary'),
-        amount:       parseFloat(r.getValue('amount')) || 0,
-        status:       approvalStatus,
-        statusLabel:  approvalStatus === C.APPROVAL_STATUS.PENDING ? 'Afventer' : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Godkendt' : 'Afvist',
-        statusClass:  approvalStatus === C.APPROVAL_STATUS.PENDING ? 'badge-orange' : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
-        step:         r.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP),
-        approver1:    r.getText(C.FIELDS.TRANSACTION.APPROVER1),
-        submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY),
-        created:      r.getValue('datecreated')
+        id:          r.id,
+        type:        r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill',
+        typeLabel:   r.getValue('type') === 'PurchOrd' ? 'Purchase Order' : 'Vendor Bill',
+        tranid:      r.getValue('tranid'),
+        entity:      r.getText('entity'),
+        currency:    r.getText('currency'),
+        subsidiary:  r.getText('subsidiary'),
+        amount:      parseFloat(r.getValue('amount')) || 0,
+        status:      approvalStatus,
+        statusLabel: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'Pending'
+                   : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
+        statusClass: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'badge-orange'
+                   : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
+        step:        r.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP),
+        approver1:   r.getText(C.FIELDS.TRANSACTION.APPROVER1),
+        submittedBy: r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY),
+        created:     r.getValue('datecreated')
       });
       return true;
     });
@@ -137,26 +137,26 @@ define([
       <tr data-id="${r.id}" data-type="${r.type}" data-step="${r.step}">
         <td>
           <select class="action-select" data-id="${r.id}">
-            <option value="">— Vælg handling —</option>
-            <option value="approve">Godkend</option>
-            <option value="decline">Afvis</option>
-            <option value="skip">Spring over</option>
+            <option value="">— Select action —</option>
+            <option value="approve">Approve</option>
+            <option value="decline">Reject</option>
+            <option value="skip">Skip</option>
           </select>
         </td>
-        <td><input type="text" class="reason-input" data-id="${r.id}" placeholder="Årsag (kræves ved afvis)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px"></td>
+        <td><input type="text" class="reason-input" data-id="${r.id}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px"></td>
         <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${r.typeLabel}</span></td>
         <td class="fw500">${r.entity || '—'}</td>
         <td class="mono">${r.tranid}</td>
         <td>${r.currency}</td>
         <td>${r.subsidiary}</td>
-        <td class="amount">${r.currency} ${r.amount.toLocaleString('da-DK', { minimumFractionDigits: 2 })}</td>
+        <td class="amount">${r.currency} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
         <td>${r.submittedBy || '—'}</td>
         <td class="muted">${r.created || '—'}</td>
         <td><span class="badge ${r.statusClass}">${r.statusLabel}</span></td>
-      </tr>`).join('') || '<tr><td colspan="11" class="empty">Ingen transaktioner matcher filteret.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="11" class="empty">No transactions match the filter.</td></tr>';
 
     return `<!DOCTYPE html>
-<html lang="da">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -216,62 +216,62 @@ define([
 <body>
 <div class="topbar">
   <span class="topbar-logo">OMNI:T</span>
-  <span class="topbar-sep">/</span>
+  <span class="topbar-sep">›</span>
   <span class="topbar-title">Omnit Approvals — Bulk Approval</span>
 </div>
 <div class="main">
   <div class="page-header">
     <div>
       <h1>Bulk Approval</h1>
-      <p class="subtitle">Behandl flere transaktioner på én gang</p>
+      <p class="subtitle">Process multiple transactions at once</p>
     </div>
     <div class="header-actions">
-      <button class="btn-secondary" onclick="resetAll()">Nulstil</button>
-      <button class="btn-primary" onclick="submitAll()">Send godkendelser</button>
+      <button class="btn-secondary" onclick="resetAll()">Reset</button>
+      <button class="btn-primary" onclick="submitAll()">Submit approvals</button>
     </div>
   </div>
 
   <div class="filters">
     <span class="filter-label">Status:</span>
-    <button class="filter-btn ${statusFilter === 'pending'  ? 'active' : ''}" onclick="setFilter('status','pending')">Afventer</button>
-    <button class="filter-btn ${statusFilter === 'approved' ? 'active' : ''}" onclick="setFilter('status','approved')">Godkendt</button>
-    <button class="filter-btn ${statusFilter === 'rejected' ? 'active' : ''}" onclick="setFilter('status','rejected')">Afvist</button>
-    <button class="filter-btn ${statusFilter === 'all'      ? 'active' : ''}" onclick="setFilter('status','all')">Alle</button>
+    <button class="filter-btn ${statusFilter === 'pending'  ? 'active' : ''}" onclick="setFilter('status','pending')">Pending</button>
+    <button class="filter-btn ${statusFilter === 'approved' ? 'active' : ''}" onclick="setFilter('status','approved')">Approved</button>
+    <button class="filter-btn ${statusFilter === 'rejected' ? 'active' : ''}" onclick="setFilter('status','rejected')">Rejected</button>
+    <button class="filter-btn ${statusFilter === 'all'      ? 'active' : ''}" onclick="setFilter('status','all')">All</button>
     <span class="filter-sep"></span>
     <span class="filter-label">Type:</span>
-    <button class="filter-btn ${typeFilter === 'all' ? 'active' : ''}" onclick="setFilter('type','all')">Alle</button>
+    <button class="filter-btn ${typeFilter === 'all' ? 'active' : ''}" onclick="setFilter('type','all')">All</button>
     <button class="filter-btn ${typeFilter === 'po'  ? 'active' : ''}" onclick="setFilter('type','po')">Purchase Order</button>
     <button class="filter-btn ${typeFilter === 'vb'  ? 'active' : ''}" onclick="setFilter('type','vb')">Vendor Bill</button>
   </div>
 
   <div class="summary-cards">
     <div class="card">
-      <div class="card-label">Total godkendt</div>
-      <div class="card-value" style="color:#2e7d32">DKK ${totalApproved.toLocaleString('da-DK', { minimumFractionDigits: 2 })}</div>
+      <div class="card-label">Total approved</div>
+      <div class="card-value" style="color:#2e7d32">${totalApproved.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
     </div>
     <div class="card">
-      <div class="card-label">Total afvist</div>
-      <div class="card-value" style="color:#c74634">DKK ${totalRejected.toLocaleString('da-DK', { minimumFractionDigits: 2 })}</div>
+      <div class="card-label">Total rejected</div>
+      <div class="card-value" style="color:#c74634">${totalRejected.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
     </div>
     <div class="card">
-      <div class="card-label">Fremgang</div>
+      <div class="card-label">Progress</div>
       <div class="card-value">${progress}%</div>
-      <div class="card-sub">${totalAll - totalPending} af ${totalAll} behandlet</div>
+      <div class="card-sub">${totalAll - totalPending} of ${totalAll} processed</div>
       <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
     </div>
   </div>
 
   <div class="table-card">
     <div class="table-toolbar">
-      <span class="muted" style="flex:1;font-size:13px">${rows.length} transaktion${rows.length !== 1 ? 'er' : ''}</span>
-      <button class="btn-secondary" style="padding:7px 16px;font-size:13px" onclick="window.location.reload()">Opdater</button>
+      <span class="muted" style="flex:1;font-size:13px">${rows.length} transaction${rows.length !== 1 ? 's' : ''}</span>
+      <button class="btn-secondary" style="padding:7px 16px;font-size:13px" onclick="window.location.reload()">Refresh</button>
     </div>
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Handling</th><th>Årsag</th><th>Type</th><th>Leverandør</th>
-          <th>Bilagsnr.</th><th>Valuta</th><th>Subsidiary</th>
-          <th style="text-align:right">Beløb</th><th>Oprettet af</th><th>Dato</th><th>Status</th>
+          <th>Action</th><th>Reason</th><th>Type</th><th>Vendor</th>
+          <th>Document #</th><th>Currency</th><th>Subsidiary</th>
+          <th style="text-align:right">Amount</th><th>Submitted by</th><th>Date</th><th>Status</th>
         </tr></thead>
         <tbody id="txn-table">${tableRows}</tbody>
       </table>
@@ -279,8 +279,8 @@ define([
   </div>
 
   <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-    <button class="btn-secondary" onclick="resetAll()">Nulstil</button>
-    <button class="btn-primary" onclick="submitAll()">Send godkendelser</button>
+    <button class="btn-secondary" onclick="resetAll()">Reset</button>
+    <button class="btn-primary" onclick="submitAll()">Submit approvals</button>
   </div>
 </div>
 
@@ -310,32 +310,32 @@ async function submitAll() {
     const reason = row.querySelector('.reason-input').value;
     if (!action || action === 'skip') return;
     if (action === 'decline' && !reason.trim()) {
-      showToast('Angiv en årsag for alle afvisninger.'); throw new Error('missing reason');
+      showToast('Please provide a reason for all rejections.'); throw new Error('missing reason');
     }
     actions.push({ recordId: id, recordType: type, step, action, comment: reason });
   });
 
-  if (!actions.length) { showToast('Ingen handlinger valgt.'); return; }
+  if (!actions.length) { showToast('No actions selected.'); return; }
 
   const btn = document.querySelector('.btn-primary');
   btn.disabled = true;
-  btn.textContent = 'Behandler...';
+  btn.textContent = 'Processing...';
 
   try {
-    const res = await fetch(SELF_URL, {
-      method: 'POST',
+    const res  = await fetch(SELF_URL, {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actions })
+      body:    JSON.stringify({ actions })
     });
     const data = await res.json();
     const ok   = data.results.filter(r => r.success).length;
     const fail = data.results.filter(r => !r.success).length;
-    showToast(\`Færdig: \${ok} behandlet\${fail ? ', ' + fail + ' fejlede' : ''}.\`);
+    showToast(\`Done: \${ok} processed\${fail ? ', ' + fail + ' failed' : ''}.\`);
     setTimeout(() => window.location.reload(), 1800);
   } catch (e) {
-    showToast('Fejl under behandling. Prøv igen.');
+    showToast('Error during processing. Please try again.');
     btn.disabled = false;
-    btn.textContent = 'Send godkendelser';
+    btn.textContent = 'Submit approvals';
   }
 }
 

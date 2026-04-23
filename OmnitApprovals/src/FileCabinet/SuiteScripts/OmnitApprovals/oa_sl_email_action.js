@@ -27,16 +27,15 @@ define([
 
   function handleGet(req, resp) {
     const token      = req.parameters.oa_token;
-    const action     = req.parameters.oa_action;      // 'approve' | 'decline'
+    const action     = req.parameters.oa_action;
     const recordType = req.parameters.oa_record_type;
     const recordId   = req.parameters.oa_record_id;
 
     if (!token || !action || !recordType || !recordId) {
-      resp.write('<p>Ugyldig forespørgsel.</p>');
+      resp.write(_errorPage('Invalid request. Please use the link from your approval email.'));
       return;
     }
 
-    // Validate token
     const fields = search.lookupFields({
       type:    recordType,
       id:      recordId,
@@ -54,39 +53,37 @@ define([
 
     const storedHash = fields[C.FIELDS.TRANSACTION.APPROVAL_TOKEN];
     if (!storedHash || utils.hashToken(token) !== storedHash) {
-      resp.write(_errorPage('Ugyldigt eller brugt token. Du kan ikke bruge dette link igen.'));
+      resp.write(_errorPage('Invalid or already used token. This link cannot be used again.'));
       return;
     }
 
-    const settings = _loadSettings(fields['subsidiary'] && fields['subsidiary'][0] && fields['subsidiary'][0].value);
+    const settings   = _loadSettings(fields['subsidiary'] && fields['subsidiary'][0] && fields['subsidiary'][0].value);
     const expiryDays = (settings && settings.token_expiry_days) ? parseInt(settings.token_expiry_days, 10) : 7;
 
     if (utils.isTokenExpired(fields[C.FIELDS.TRANSACTION.TOKEN_CREATED], expiryDays)) {
-      resp.write(_errorPage('Dette link er udløbet. Log ind i NetSuite for at behandle transaktionen.'));
+      resp.write(_errorPage('This link has expired. Please log in to NetSuite to process the transaction.'));
       return;
     }
 
     if (fields['approvalstatus'] !== C.APPROVAL_STATUS.PENDING) {
-      resp.write(_errorPage('Denne transaktion er allerede behandlet.'));
+      resp.write(_errorPage('This transaction has already been processed.'));
       return;
     }
 
     const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
 
     if (action === 'approve') {
-      // Find approver from step field to use as actor
-      const approverField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const approverArr1 = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
-      const actorId = Array.isArray(approverArr1) && approverArr1[0] ? approverArr1[0].value : null;
+      const approverField  = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
+      const approverArr    = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const actorId        = Array.isArray(approverArr) && approverArr[0] ? approverArr[0].value : null;
       engine.processApproval(recordId, recordType, actorId, step, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('approve'));
       return;
     }
 
     if (action === 'decline') {
-      // Show comment form
-      const actionUrl = _selfUrl(req);
-      const currencyVal = fields['currency'] && fields['currency'][0] ? fields['currency'][0].text : '';
+      const actionUrl      = _selfUrl(req);
+      const currencyVal    = fields['currency'] && fields['currency'][0] ? fields['currency'][0].text : '';
       resp.write(tpl.buildDeclineCommentPage({
         documentNumber: fields['tranid'],
         subsidiaryName: fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text : '',
@@ -112,7 +109,7 @@ define([
       const token   = req.parameters.oa_token;
       const comment = req.parameters.oa_comment;
       if (!comment || !comment.trim()) {
-        resp.write(_errorPage('Du skal angive en årsag til afvisningen.'));
+        resp.write(_errorPage('A reason for rejection is required.'));
         return;
       }
 
@@ -122,14 +119,14 @@ define([
         columns: [C.FIELDS.TRANSACTION.APPROVAL_TOKEN, C.FIELDS.TRANSACTION.TOKEN_CREATED, C.FIELDS.TRANSACTION.CURRENT_STEP]
       });
       if (utils.hashToken(token) !== fields[C.FIELDS.TRANSACTION.APPROVAL_TOKEN]) {
-        resp.write(_errorPage('Ugyldigt token.'));
+        resp.write(_errorPage('Invalid token.'));
         return;
       }
 
-      const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
+      const step          = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
       const approverField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const approverArr2 = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
-      const actorId = Array.isArray(approverArr2) && approverArr2[0] ? approverArr2[0].value : null;
+      const approverArr   = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const actorId       = Array.isArray(approverArr) && approverArr[0] ? approverArr[0].value : null;
       engine.processDecline(recordId, recordType, actorId, comment, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('decline'));
       return;
@@ -155,7 +152,7 @@ define([
         result = engine.processReset(recordId, recordType, userId, req.parameters.oa_new_approver);
         break;
       default:
-        result = { success: false, message: 'Ukendt handling.' };
+        result = { success: false, message: 'Unknown action.' };
     }
 
     resp.setHeader({ name: 'Content-Type', value: 'application/json' });
@@ -172,11 +169,11 @@ define([
   }
 
   function _errorPage(msg) {
-    return `<!DOCTYPE html><html lang="da"><head><meta charset="UTF-8">
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>body{font-family:-apple-system,sans-serif;padding:40px;background:#f4f4f4}
 .card{max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:40px;box-shadow:0 2px 12px rgba(0,0,0,.09)}
 h2{color:#c74634;margin:0 0 12px}p{color:#555;line-height:1.7}</style></head>
-<body><div class="card"><h2>Fejl</h2><p>${msg}</p></div></body></html>`;
+<body><div class="card"><h2>Error</h2><p>${msg}</p></div></body></html>`;
   }
 
   return { onRequest };

@@ -25,7 +25,10 @@ define([], () => {
         APPROVE_STRING:    'custrecord_oa_approve_string',
         REJECT_STRING:     'custrecord_oa_reject_string',
         EMAIL_ENABLED:     'custrecord_oa_email_enabled',
-        TOKEN_EXPIRY_DAYS: 'custrecord_oa_token_expiry_days'
+        TOKEN_EXPIRY_DAYS: 'custrecord_oa_token_expiry_days',
+        EMAIL_SENDER:      'custrecord_oa_email_sender',
+        EMAIL_SUBJECT:     'custrecord_oa_email_subject',
+        EMAIL_INTRO:       'custrecord_oa_email_intro'
       },
       HIERARCHY: {
         SETTINGS:     'custrecord_oah_settings',

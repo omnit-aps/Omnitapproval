@@ -67,6 +67,9 @@ define([
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.REJECT_STRING,     value: p.oa_reject_string  || 'Reject' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_ENABLED,     value: p.oa_email_enabled === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_SENDER,      value: parseInt(p.oa_email_sender, 10) || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_SUBJECT,     value: p.oa_email_subject || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_INTRO,       value: p.oa_email_intro   || '' });
       const savedId = rec.save();
 
       saveMatrixRows(savedId, p);
@@ -210,27 +213,38 @@ define([
           <div class="form-grid">
             <div class="form-group">
               <label>Subsidiary *</label>
+              <span class="field-help">The subsidiary these approval settings apply to. Each subsidiary must have its own configuration.</span>
               ${subsidiarySelect('oa_subsidiary', s.subsidiary)}
             </div>
             <div class="form-group">
               <label>Number of approvers</label>
+              <span class="field-help">Single step: one approver signs off. Two step: the transaction must be approved by two people in sequence.</span>
               <select name="oa_approver_count">
                 <option value="1" ${s.approver_count == 1 ? 'selected' : ''}>1 — Single step</option>
                 <option value="2" ${s.approver_count == 2 ? 'selected' : ''}>2 — Two step</option>
               </select>
             </div>
             <div class="form-group toggle-row">
-              <label>Enable PO approval</label>
+              <div>
+                <label style="margin-bottom:2px">Enable PO approval</label>
+                <span class="field-help">When on, Purchase Orders will be routed for approval when saved.</span>
+              </div>
               <label class="toggle"><input type="checkbox" name="oa_enable_po_cb" onchange="syncHidden(this,'oa_enable_po')" ${s.enable_po ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_enable_po" value="${s.enable_po ? 'T' : 'F'}">
             </div>
             <div class="form-group toggle-row">
-              <label>Enable Vendor Bill approval</label>
+              <div>
+                <label style="margin-bottom:2px">Enable Vendor Bill approval</label>
+                <span class="field-help">When on, Vendor Bills will be routed for approval when saved.</span>
+              </div>
               <label class="toggle"><input type="checkbox" name="oa_enable_vb_cb" onchange="syncHidden(this,'oa_enable_vb')" ${s.enable_vb ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_enable_vb" value="${s.enable_vb ? 'T' : 'F'}">
             </div>
             <div class="form-group toggle-row">
-              <label>Use amount thresholds</label>
+              <div>
+                <label style="margin-bottom:2px">Use amount thresholds</label>
+                <span class="field-help">When on, the approval matrix below is used to select the approver based on the transaction amount. When off, the default approvers above are always used.</span>
+              </div>
               <label class="toggle"><input type="checkbox" name="oa_use_amount_cb" onchange="syncHidden(this,'oa_use_amount')" ${s.use_amount ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_use_amount" value="${s.use_amount ? 'T' : 'F'}">
             </div>
@@ -242,10 +256,12 @@ define([
           <div class="form-grid">
             <div class="form-group">
               <label>Default approver 1 *</label>
+              <span class="field-help">The primary approver for all transactions under this subsidiary. Used when no amount threshold rule matches.</span>
               ${employeeSelect('oa_default_approver1', s.default_approver1)}
             </div>
             <div class="form-group">
               <label>Default approver 2 <span class="muted">(2-step only)</span></label>
+              <span class="field-help">The second approver in a two-step flow. Only relevant when "Number of approvers" is set to 2.</span>
               ${employeeSelect('oa_default_approver2', s.default_approver2)}
             </div>
           </div>
@@ -255,20 +271,41 @@ define([
           <h2>Email & buttons</h2>
           <div class="form-grid">
             <div class="form-group toggle-row">
-              <label>Enable email approval</label>
+              <div>
+                <label style="margin-bottom:2px">Enable email approval</label>
+                <span class="field-help">When on, approvers receive an email with Approve and Reject buttons so they can act without logging in to NetSuite.</span>
+              </div>
               <label class="toggle"><input type="checkbox" name="oa_email_enabled_cb" onchange="syncHidden(this,'oa_email_enabled')" ${s.email_enabled ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_email_enabled" value="${s.email_enabled ? 'T' : 'F'}">
             </div>
             <div class="form-group">
+              <label>Email sender (From)</label>
+              <span class="field-help">The NetSuite employee whose email address appears as the sender. If left blank, the email is sent from whoever submitted the transaction.</span>
+              ${employeeSelect('oa_email_sender', s.email_sender)}
+            </div>
+            <div class="form-group">
+              <label>Email subject</label>
+              <span class="field-help">Subject line of the approval email. Use {docNumber} to insert the document number automatically.</span>
+              <input type="text" name="oa_email_subject" value="${s.email_subject || 'Approval required — {docNumber}'}">
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Email intro text</label>
+              <span class="field-help">The introductory paragraph in the approval email. Use {recordType}, {subsidiary}, {docNumber} and {requester} as placeholders.</span>
+              <textarea name="oa_email_intro" rows="4" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical">${s.email_intro || 'A new {recordType} from {subsidiary} has been entered in NetSuite and requires your approval. Please see the attached document for full details.'}</textarea>
+            </div>
+            <div class="form-group">
               <label>Token expires (days)</label>
+              <span class="field-help">How many days the email approval link stays valid. After expiry the approver must log in to NetSuite to act.</span>
               <input type="number" name="oa_token_expiry_days" value="${(s.token_expiry_days || typeof s.token_expiry_days === 'number') ? s.token_expiry_days : 7}" min="1" max="30">
             </div>
             <div class="form-group">
               <label>Approve button text</label>
+              <span class="field-help">Label shown on the green approve button in the email and on the transaction form.</span>
               <input type="text" name="oa_approve_string" value="${s.approve_string || 'Approve'}">
             </div>
             <div class="form-group">
               <label>Reject button text</label>
+              <span class="field-help">Label shown on the red reject button in the email and on the transaction form.</span>
               <input type="text" name="oa_reject_string" value="${s.reject_string || 'Reject'}">
             </div>
           </div>
@@ -526,6 +563,7 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   .data-table tbody select{width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit}
   .data-table tbody select:focus{border-color:#c74634;outline:none}
   .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
+  .field-help{display:block;font-size:12px;color:#aaa;font-weight:400;margin-bottom:6px;line-height:1.5}
 </style>
 </head>
 <body>
