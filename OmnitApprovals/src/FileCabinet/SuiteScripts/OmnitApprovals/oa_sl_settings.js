@@ -397,7 +397,9 @@ define([
 
     if (!hierarchyId) {
       const h = record.create({ type: C.RECORDS.HIERARCHY, isDynamic: false });
-      h.setValue({ fieldId: 'name',                          value: 'Auto-' + prefix.toUpperCase() });
+      const autoName = 'Auto - ' + settingsId + ' - ' + prefix.toUpperCase();
+      h.setValue({ fieldId: 'name',                          value: autoName });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.NAME,         value: autoName });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.SETTINGS,     value: settingsId });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.STATUS,       value: C.HIERARCHY_STATUS.ACTIVE });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.RECORD_TYPE,  value: recordType });
