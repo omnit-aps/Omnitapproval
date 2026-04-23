@@ -7,20 +7,20 @@
   <notifyowner>T</notifyowner>
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_cs_po">
-      <status>TESTING</status>
+      <status>RELEASED</status>
       <recordtype>PURCHASEORDER</recordtype>
       <allemployees>T</allemployees>
       <allpartners>F</allpartners>
-      <allroles>F</allroles>
+      <allroles>T</allroles>
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
     </scriptdeployment>
     <scriptdeployment scriptid="customdeploy_oa_cs_vb">
-      <status>TESTING</status>
+      <status>RELEASED</status>
       <recordtype>VENDORBILL</recordtype>
       <allemployees>T</allemployees>
       <allpartners>F</allpartners>
-      <allroles>F</allroles>
+      <allroles>T</allroles>
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
     </scriptdeployment>
