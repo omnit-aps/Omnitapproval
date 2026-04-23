@@ -281,53 +281,6 @@ define([
       var _counters = { po: ${poRows.length}, vb: ${vbRows.length} };
       var _empOptions = ${empOptsJson};
       var _useAmount = ${useAmount ? 'true' : 'false'};
-      function addRow(prefix) {
-        var i = _counters[prefix]++;
-        var em = document.getElementById(prefix + '-empty-msg');
-        if (em) em.style.display = 'none';
-        var amountDisplay = _useAmount ? '' : 'display:none;';
-        var tr = document.createElement('tr');
-        tr.setAttribute('data-row', i);
-        tr.innerHTML =
-          '<td class="amount-col" style="' + amountDisplay + '"><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>' +
-          '<td><select name="' + prefix + '_row_' + i + '_approver1">' + _empOptions + '</select></td>' +
-          '<td><select name="' + prefix + '_row_' + i + '_approver2">' + _empOptions + '</select></td>' +
-          '<td><input type="hidden" name="' + prefix + '_row_' + i + '_id" value="new">' +
-              '<button type="button" class="btn-link-danger" onclick="deleteRow(this,\'' + prefix + '\')">Slet</button></td>';
-        document.getElementById(prefix + '-matrix-body').appendChild(tr);
-      }
-      function deleteRow(btn, prefix) {
-        btn.closest('tr').remove();
-        reindexRows(prefix);
-      }
-      function reindexRows(prefix) {
-        var rows = document.querySelectorAll('#' + prefix + '-matrix-body tr');
-        rows.forEach(function(tr, idx) {
-          tr.setAttribute('data-row', idx);
-          tr.querySelectorAll('input[name], select[name]').forEach(function(el) {
-            el.name = el.name.replace(new RegExp('^' + prefix + '_row_\\d+_'), prefix + '_row_' + idx + '_');
-          });
-        });
-        var countEl = document.getElementById(prefix + '_row_count');
-        if (countEl) countEl.value = rows.length;
-      }
-      function syncRowCount() { reindexRows('po'); reindexRows('vb'); }
-      function setAmountCols(show) {
-        document.querySelectorAll('.amount-col').forEach(function(el) {
-          el.style.display = show ? '' : 'none';
-        });
-        _useAmount = show;
-      }
-      function syncHidden(cb, name) {
-        document.querySelector('[name="' + name + '"]').value = cb.checked ? 'T' : 'F';
-        if (name === 'oa_enable_vb' || name === 'oa_enable_po') {
-          var prefix = name === 'oa_enable_vb' ? 'vb' : 'po';
-          var wrapper = document.querySelector('.matrix-wrapper[data-type="' + prefix + '"]');
-          if (wrapper) wrapper.style.display = cb.checked ? '' : 'none';
-        } else if (name === 'oa_use_amount') {
-          setAmountCols(cb.checked);
-        }
-      }
       var subSel = document.querySelector('[name="oa_subsidiary"]');
       if (subSel) subSel.addEventListener('change', function() {
         var opt = this.options[this.selectedIndex];
@@ -573,6 +526,55 @@ define([
   .data-table tbody select:focus{border-color:#c74634;outline:none}
   .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
 </style>
+<script>
+function addRow(prefix) {
+  var i = _counters[prefix]++;
+  var em = document.getElementById(prefix + '-empty-msg');
+  if (em) em.style.display = 'none';
+  var amountDisplay = _useAmount ? '' : 'display:none;';
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-row', i);
+  tr.innerHTML =
+    '<td class="amount-col" style="' + amountDisplay + '"><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"><\/td>' +
+    '<td><select name="' + prefix + '_row_' + i + '_approver1">' + _empOptions + '<\/select><\/td>' +
+    '<td><select name="' + prefix + '_row_' + i + '_approver2">' + _empOptions + '<\/select><\/td>' +
+    '<td><input type="hidden" name="' + prefix + '_row_' + i + '_id" value="new">' +
+        '<button type="button" class="btn-link-danger" onclick="deleteRow(this,\'' + prefix + '\')">Slet<\/button><\/td>';
+  document.getElementById(prefix + '-matrix-body').appendChild(tr);
+}
+function deleteRow(btn, prefix) {
+  btn.closest('tr').remove();
+  reindexRows(prefix);
+}
+function reindexRows(prefix) {
+  var rows = document.querySelectorAll('#' + prefix + '-matrix-body tr');
+  rows.forEach(function(tr, idx) {
+    tr.setAttribute('data-row', idx);
+    tr.querySelectorAll('input[name], select[name]').forEach(function(el) {
+      el.name = el.name.replace(new RegExp('^' + prefix + '_row_\\d+_'), prefix + '_row_' + idx + '_');
+    });
+  });
+  var countEl = document.getElementById(prefix + '_row_count');
+  if (countEl) countEl.value = rows.length;
+}
+function syncRowCount() { reindexRows('po'); reindexRows('vb'); }
+function setAmountCols(show) {
+  document.querySelectorAll('.amount-col').forEach(function(el) {
+    el.style.display = show ? '' : 'none';
+  });
+  _useAmount = show;
+}
+function syncHidden(cb, name) {
+  document.querySelector('[name="' + name + '"]').value = cb.checked ? 'T' : 'F';
+  if (name === 'oa_enable_vb' || name === 'oa_enable_po') {
+    var pfx = name === 'oa_enable_vb' ? 'vb' : 'po';
+    var wrapper = document.querySelector('.matrix-wrapper[data-type="' + pfx + '"]');
+    if (wrapper) wrapper.style.display = cb.checked ? '' : 'none';
+  } else if (name === 'oa_use_amount') {
+    setAmountCols(cb.checked);
+  }
+}
+</script>
 </head>
 <body>
 <div class="topbar">
