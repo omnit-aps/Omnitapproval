@@ -136,7 +136,7 @@ define([
         }).run().each(hr => {
           search.create({
             type:    C.RECORDS.THRESHOLD,
-            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hr.id]],
+            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
             columns: ['internalid', C.FIELDS.THRESHOLD.MIN_AMOUNT, C.FIELDS.THRESHOLD.APPROVER, C.FIELDS.THRESHOLD.APPROVER2, C.FIELDS.THRESHOLD.SORT_ORDER]
           }).run().each(t => {
             matrixRows.push({
@@ -261,10 +261,9 @@ define([
           <a href="${selfUrl}" class="btn-secondary">Annuller</a>
           <button type="submit" class="btn-primary">Gem indstillinger</button>
         </div>
-      </form>
 
-      <div class="card section">
-        <div class="section-header">
+        <div class="card section">
+          <div class="section-header">
           <div>
             <h2 style="margin-bottom:4px">Godkendelsesmatrix</h2>
             <p class="muted">Regler sorteres efter beløbsgrænse. Godkender 2 kræver "To trin".</p>
@@ -283,7 +282,8 @@ define([
           </table>
         </div>
         ${matrixRows.length === 0 ? '<p id="empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>' : ''}
-      </div>
+        </div>
+      </form>
 
       <script>
       var _rowCounter = ${matrixRows.length};
@@ -376,7 +376,7 @@ define([
       if (hierarchyId) {
         search.create({
           type:    C.RECORDS.THRESHOLD,
-          filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchyId]],
+          filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hierarchyId]],
           columns: ['internalid']
         }).run().each(t => {
           try { record.delete({ type: C.RECORDS.THRESHOLD, id: parseInt(t.id, 10) }); } catch (e) {}
@@ -400,7 +400,7 @@ define([
     const existingIds = [];
     search.create({
       type:    C.RECORDS.THRESHOLD,
-      filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', hierarchyId]],
+      filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hierarchyId]],
       columns: ['internalid']
     }).run().each(r => { existingIds.push(parseInt(r.id, 10)); return true; });
 

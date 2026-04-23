@@ -74,7 +74,7 @@ define([
     const thresholds = [];
     search.create({
       type: C.RECORDS.THRESHOLD,
-      filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'anyof', h.id]],
+      filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', h.id]],
       columns: Object.values(C.FIELDS.THRESHOLD)
     }).run().each(r => {
       thresholds.push({
