@@ -144,7 +144,7 @@ define([
           search.create({
             type:    C.RECORDS.HIERARCHY,
             filters: [
-              [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
+              [C.FIELDS.HIERARCHY.SETTINGS,    'equalto', settingsId],
               'AND',
               [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',    recordType]
             ],
@@ -411,7 +411,7 @@ define([
     search.create({
       type:    C.RECORDS.HIERARCHY,
       filters: [
-        [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
+        [C.FIELDS.HIERARCHY.SETTINGS,    'equalto', settingsId],
         'AND',
         [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',    recordType]
       ],

@@ -32,9 +32,10 @@ define([
     const recordType = rec.type;
     const recordId   = rec.id;
 
-    // Only re-route if status is pending or if this is a fresh create
     const currentStatus = rec.getValue('approvalstatus');
     if (currentStatus === C.APPROVAL_STATUS.APPROVED) return;
+    // On EDIT, skip if already pending — the internal record.save() in afterSubmit would re-trigger this
+    if (context.type === TRIGGER.EDIT && currentStatus === C.APPROVAL_STATUS.PENDING) return;
 
     const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
     if (!subsidiaryId) return;
@@ -53,7 +54,7 @@ define([
 
     const txn = record.load({ type: recordType, id: recordId, isDynamic: false });
     txn.setValue({ fieldId: 'approvalstatus',                         value: C.APPROVAL_STATUS.PENDING });
-    txn.setValue({ fieldId: 'nextapprover',                           value: approver1 });
+    try { txn.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', rec.type); }
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,        value: 1 });
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,           value: approver1 });
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2,           value: approver2 || '' });

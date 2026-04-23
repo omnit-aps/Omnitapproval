@@ -22,9 +22,9 @@ define([
   const PARAM_RAW_TOKEN   = 'custscript_oa_mr_raw_token';
 
   function getInputData(inputContext) {
-    const params     = runtime.getCurrentScript().getParameter;
-    const recordId   = params({ name: PARAM_RECORD_ID });
-    const recordType = params({ name: PARAM_RECORD_TYPE });
+    const script     = runtime.getCurrentScript();
+    const recordId   = script.getParameter({ name: PARAM_RECORD_ID });
+    const recordType = script.getParameter({ name: PARAM_RECORD_TYPE });
 
     if (recordId && recordType) {
       return [{ recordId, recordType }];
