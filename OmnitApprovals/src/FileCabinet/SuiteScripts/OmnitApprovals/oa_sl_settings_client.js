@@ -19,6 +19,9 @@
       _ua   = d.getAttribute('data-use-amount') === 'true';
     }
 
+    updatePriorityButtons('po');
+    updatePriorityButtons('vb');
+
     var sub = document.querySelector('[name="oa_subsidiary"]');
     if (sub) {
       sub.addEventListener('change', function () {
@@ -41,7 +44,31 @@
     });
     var cnt = document.getElementById(p + '_row_count');
     if (cnt) cnt.value = rows.length;
+    updatePriorityButtons(p);
   }
+
+  function updatePriorityButtons(p) {
+    var rows = document.querySelectorAll('#' + p + '-matrix-body tr');
+    rows.forEach(function (tr, i) {
+      var btns = tr.querySelectorAll('.btn-prio');
+      if (btns[0]) btns[0].disabled = i === 0;
+      if (btns[1]) btns[1].disabled = i === rows.length - 1;
+    });
+  }
+
+  window.moveRowUp = function (btn, p) {
+    var tr   = btn.closest('tr');
+    var prev = tr.previousElementSibling;
+    if (prev) tr.parentNode.insertBefore(tr, prev);
+    reindex(p);
+  };
+
+  window.moveRowDown = function (btn, p) {
+    var tr   = btn.closest('tr');
+    var next = tr.nextElementSibling;
+    if (next) tr.parentNode.insertBefore(next, tr);
+    reindex(p);
+  };
 
   window.addRow = function (p) {
     var i    = _c[p]++;
@@ -53,6 +80,17 @@
 
     var tr = document.createElement('tr');
     tr.setAttribute('data-row', i);
+
+    // Priority cell (▲ ▼ buttons)
+    var td0    = document.createElement('td');
+    td0.className = 'prio-col';
+    var btnUp  = document.createElement('button');
+    btnUp.type = 'button'; btnUp.className = 'btn-prio'; btnUp.textContent = '▲';
+    btnUp.addEventListener('click', (function (pfx) { return function () { window.moveRowUp(this, pfx); }; })(p));
+    var btnDn  = document.createElement('button');
+    btnDn.type = 'button'; btnDn.className = 'btn-prio'; btnDn.textContent = '▼';
+    btnDn.addEventListener('click', (function (pfx) { return function () { window.moveRowDown(this, pfx); }; })(p));
+    td0.appendChild(btnUp); td0.appendChild(btnDn);
 
     // Amount cell
     var td1 = document.createElement('td');
@@ -80,15 +118,16 @@
     var td4 = document.createElement('td');
     var hid = document.createElement('input');
     hid.type = 'hidden'; hid.name = p + '_row_' + i + '_id'; hid.value = 'new';
-    var btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'btn-link-danger'; btn.textContent = 'Delete';
-    btn.addEventListener('click', (function (prefix) {
+    var btnDel = document.createElement('button');
+    btnDel.type = 'button'; btnDel.className = 'btn-link-danger'; btnDel.textContent = 'Delete';
+    btnDel.addEventListener('click', (function (prefix) {
       return function () { window.deleteRow(this, prefix); };
     })(p));
-    td4.appendChild(hid); td4.appendChild(btn);
+    td4.appendChild(hid); td4.appendChild(btnDel);
 
-    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
+    tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
     document.getElementById(p + '-matrix-body').appendChild(tr);
+    updatePriorityButtons(p);
   };
 
   window.deleteRow = function (btn, p) {

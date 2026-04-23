@@ -25,9 +25,10 @@ define([
     const script     = runtime.getCurrentScript();
     const recordId   = script.getParameter({ name: PARAM_RECORD_ID });
     const recordType = script.getParameter({ name: PARAM_RECORD_TYPE });
+    const rawToken   = script.getParameter({ name: PARAM_RAW_TOKEN }) || '';
 
     if (recordId && recordType) {
-      return [{ recordId, recordType }];
+      return [{ recordId, recordType, rawToken }];
     }
 
     const results = [];
@@ -42,7 +43,7 @@ define([
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
-      results.push({ recordId: r.id, recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill' });
+      results.push({ recordId: r.id, recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill', rawToken: '' });
       return true;
     });
     return results;
@@ -57,8 +58,23 @@ define([
     const item       = JSON.parse(reduceContext.values[0]);
     const recordId   = item.recordId;
     const recordType = item.recordType;
+    let   rawToken   = item.rawToken || '';
 
     try {
+      // Scheduled sweep passes no token — generate and persist a fresh one per record
+      if (!rawToken) {
+        rawToken = utils.generateToken();
+        try {
+          const txnRec = record.load({ type: recordType, id: recordId, isDynamic: false });
+          txnRec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: utils.hashToken(rawToken) });
+          txnRec.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,  value: new Date() });
+          txnRec.save({ ignoreMandatoryFields: true });
+        } catch (te) {
+          log.error('OA MR: token refresh failed', `Record ${recordId}: ${te.message}`);
+          return;
+        }
+      }
+
       const fields = search.lookupFields({
         type:    recordType,
         id:      recordId,
@@ -120,8 +136,6 @@ define([
 
       // Sender: use the configured sender employee if set, otherwise the scheduling user
       const senderEmployeeId = (settings && settings.email_sender) || runtime.getCurrentUser().id;
-
-      const rawToken = runtime.getCurrentScript().getParameter({ name: PARAM_RAW_TOKEN }) || '';
 
       const slUrl = url.resolveScript({
         scriptId:          'customscript_oa_sl_email_action',

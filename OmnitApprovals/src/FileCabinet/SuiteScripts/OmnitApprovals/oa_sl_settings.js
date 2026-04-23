@@ -256,12 +256,12 @@ define([
           <div class="form-grid">
             <div class="form-group">
               <label>Default approver 1 *</label>
-              <span class="field-help">The primary approver for all transactions under this subsidiary. Used when no amount threshold rule matches.</span>
+              <span class="field-help">The primary approver used when amount thresholds are off, or when the transaction amount falls in a gap between threshold rules.</span>
               ${employeeSelect('oa_default_approver1', s.default_approver1)}
             </div>
             <div class="form-group">
               <label>Default approver 2 <span class="muted">(2-step only)</span></label>
-              <span class="field-help">The second approver in a two-step flow. Only relevant when "Number of approvers" is set to 2.</span>
+              <span class="field-help">The second approver used as fallback in a two-step flow when no threshold rule matches. Only relevant when "Number of approvers" is 2.</span>
               ${employeeSelect('oa_default_approver2', s.default_approver2)}
             </div>
           </div>
@@ -363,8 +363,12 @@ define([
 
   function renderMatrix(prefix, title, rows, useAmount, isEnabled) {
     const colStyle  = useAmount ? '' : ' style="display:none"';
-    const rowsHtml = rows.map((row, i) => {
+    const total     = rows.length;
+    const rowsHtml  = rows.map((row, i) => {
+      const upDis   = i === 0        ? ' disabled' : '';
+      const downDis = i === total - 1 ? ' disabled' : '';
       return `<tr data-row="${i}">
+          <td class="prio-col"><button type="button" class="btn-prio" onclick="moveRowUp(this,'${prefix}')"${upDis}>▲</button><button type="button" class="btn-prio" onclick="moveRowDown(this,'${prefix}')"${downDis}>▼</button></td>
           <td class="amount-col"${colStyle}><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
@@ -376,7 +380,8 @@ define([
         <div class="section-header">
           <div>
             <h2 style="margin-bottom:4px">${title}</h2>
-            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Sorted ascending — next row's amount is the upper limit.</p>
+            <p class="muted" style="margin-top:2px;font-size:12px">Row order = priority. Top row wins if two rules overlap. If no rule matches, the default approver above is used.</p>
+            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Amounts are in the subsidiary's base currency. Next row's "Amount from" acts as this row's upper limit.</p>
           </div>
           <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Add rule</button>
         </div>
@@ -384,6 +389,7 @@ define([
         <div class="table-scroll">
           <table class="data-table">
             <thead><tr>
+              <th class="prio-col" style="width:72px">Priority</th>
               <th class="amount-col"${colStyle} style="width:150px">Amount from</th>
               <th>Approver 1</th>
               <th>Approver 2 <span style="font-weight:normal;color:#aaa">(optional)</span></th>
@@ -564,6 +570,10 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   .data-table tbody select:focus{border-color:#c74634;outline:none}
   .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
   .field-help{display:block;font-size:12px;color:#aaa;font-weight:400;margin-bottom:6px;line-height:1.5}
+  .prio-col{white-space:nowrap;text-align:center}
+  .btn-prio{background:none;border:1px solid #ddd;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;color:#666;line-height:1.4;margin:0 1px}
+  .btn-prio:hover:not(:disabled){background:#f5f5f5;border-color:#aaa}
+  .btn-prio:disabled{color:#ddd;cursor:default;border-color:#eee}
 </style>
 </head>
 <body>

@@ -207,7 +207,7 @@ define([
   // ─── Process Delegation ──────────────────────────────────────────────────────
 
   function processDelegation(recordId, recordType, actorId, targetId) {
-    const canDelegate    = utils.lookupEmployeeField(actorId,  C.FIELDS.EMPLOYEE.CAN_DELEGATE);
+    const canDelegate      = utils.lookupEmployeeField(actorId,  C.FIELDS.EMPLOYEE.CAN_DELEGATE);
     const targetIsApprover = utils.lookupEmployeeField(targetId, C.FIELDS.EMPLOYEE.IS_APPROVER);
     if (!canDelegate)      return { success: false, message: 'Actor cannot delegate.' };
     if (!targetIsApprover) return { success: false, message: 'Target is not an approver.' };
@@ -216,11 +216,17 @@ define([
     const step      = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
     const stepField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
 
-    txn.setValue({ fieldId: stepField, value: targetId });
+    const rawToken    = utils.generateToken();
+    const hashedToken = utils.hashToken(rawToken);
+
+    txn.setValue({ fieldId: stepField,                               value: targetId });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN,    value: hashedToken });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,     value: new Date() });
     _setNextApprover(txn, targetId);
     txn.save({ ignoreMandatoryFields: true });
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.DELEGATED, actorId, targetId, step });
+    _scheduleNotification(recordId, recordType, rawToken);
     return { success: true, message: 'Delegated successfully.' };
   }
 
@@ -230,14 +236,20 @@ define([
     const isManager = utils.lookupEmployeeField(managerId, C.FIELDS.EMPLOYEE.IS_MANAGER);
     if (!isManager) return { success: false, message: 'Actor is not a manager.' };
 
+    const rawToken    = utils.generateToken();
+    const hashedToken = utils.hashToken(rawToken);
+
     const txn = record.load({ type: recordType, id: recordId, isDynamic: false });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 1 });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,    value: newApproverId });
-    txn.setValue({ fieldId: 'approvalstatus',                   value: C.APPROVAL_STATUS.PENDING });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,   value: 1 });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,      value: newApproverId });
+    txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.PENDING });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: hashedToken });
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,  value: new Date() });
     _setNextApprover(txn, newApproverId);
     txn.save({ ignoreMandatoryFields: true });
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.RESET, actorId: managerId, targetId: newApproverId, step: 1 });
+    _scheduleNotification(recordId, recordType, rawToken);
     return { success: true, message: 'Flow reset with new approver.' };
   }
 
