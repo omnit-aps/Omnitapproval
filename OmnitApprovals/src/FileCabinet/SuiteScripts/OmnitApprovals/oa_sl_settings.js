@@ -63,8 +63,8 @@ define([
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.USE_AMOUNT,        value: p.oa_use_amount === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER1, value: parseInt(p.oa_default_approver1, 10) || '' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.DEFAULT_APPROVER2, value: parseInt(p.oa_default_approver2, 10) || '' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVE_STRING,    value: p.oa_approve_string || 'Godkend' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.REJECT_STRING,     value: p.oa_reject_string  || 'Afvis' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVE_STRING,    value: p.oa_approve_string || 'Approve' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.REJECT_STRING,     value: p.oa_reject_string  || 'Reject' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_ENABLED,     value: p.oa_email_enabled === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
       const savedId = rec.save();
@@ -88,9 +88,9 @@ define([
         id:         r.id,
         subsidiary: r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
         approver1:  r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
-        emailOn:    r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Ja' : 'Nej',
-        enablePO:   r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Ja' : 'Nej',
-        enableVB:   r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Ja' : 'Nej'
+        emailOn:    r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Yes' : 'No',
+        enablePO:   r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Yes' : 'No',
+        enableVB:   r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Yes' : 'No'
       });
       return true;
     });
@@ -99,26 +99,26 @@ define([
       <tr>
         <td>${r.subsidiary}</td>
         <td>${r.approver1}</td>
-        <td><span class="badge ${r.emailOn === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
-        <td><span class="badge ${r.enablePO === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
-        <td><span class="badge ${r.enableVB === 'Ja' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
-        <td><a href="${selfUrl}&oa_view=edit&oa_settings_id=${r.id}" class="link">Rediger</a></td>
+        <td><span class="badge ${r.emailOn === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
+        <td><span class="badge ${r.enablePO === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
+        <td><span class="badge ${r.enableVB === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
+        <td><a href="${selfUrl}&oa_view=edit&oa_settings_id=${r.id}" class="link">Edit</a></td>
       </tr>`).join('');
 
-    return _shell('Omnit Approvals — Konfiguration', `
+    return _shell('Omnit Approvals — Configuration', `
       <div class="page-header">
         <div>
-          <h1>Konfiguration</h1>
-          <p class="subtitle">Administrer godkendelsesindstillinger per subsidiary</p>
+          <h1>Configuration</h1>
+          <p class="subtitle">Manage approval settings per subsidiary</p>
         </div>
-        <a href="${selfUrl}&oa_view=edit&oa_settings_id=new" class="btn-primary">+ Ny konfiguration</a>
+        <a href="${selfUrl}&oa_view=edit&oa_settings_id=new" class="btn-primary">+ New configuration</a>
       </div>
       <div class="card">
         <table class="data-table">
           <thead><tr>
-            <th>Subsidiary</th><th>Standard godkender</th><th>Email</th><th>PO</th><th>VB</th><th></th>
+            <th>Subsidiary</th><th>Default approver</th><th>Email</th><th>PO</th><th>VB</th><th></th>
           </tr></thead>
-          <tbody>${tableRows || '<tr><td colspan="6" class="empty">Ingen konfigurationer endnu.</td></tr>'}</tbody>
+          <tbody>${tableRows || '<tr><td colspan="6" class="empty">No configurations yet.</td></tr>'}</tbody>
         </table>
       </div>`, selfUrl);
   }
@@ -174,12 +174,12 @@ define([
         poRows = loadRowsForType(C.HIERARCHY_RECORD_TYPES.PO);
         vbRows = loadRowsForType(C.HIERARCHY_RECORD_TYPES.VB);
       } catch (e) {
-        return renderError(`Konfiguration med ID ${settingsId} ikke fundet.`, selfUrl);
+        return renderError(`Configuration with ID ${settingsId} not found.`, selfUrl);
       }
     }
 
     // Pre-build employee options HTML for client-side new rows
-    const empOpts = ['<option value="">— Vælg medarbejder —</option>'];
+    const empOpts = ['<option value="">— Select employee —</option>'];
     search.create({
       type:    'employee',
       filters: [['isinactive', 'is', 'F']],
@@ -193,11 +193,11 @@ define([
     const enablePo    = !!s.enable_po;
     const enableVb    = !!s.enable_vb;
 
-    return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
+    return _shell(`${settingsId === 'new' ? 'New' : 'Edit'} configuration`, `
       <div class="page-header">
         <div>
-          <a href="${selfUrl}" class="back-link">← Tilbage til liste</a>
-          <h1>${settingsId === 'new' ? 'Ny konfiguration' : s.subsidiary_text || 'Rediger konfiguration'}</h1>
+          <a href="${selfUrl}" class="back-link">← Back to list</a>
+          <h1>${settingsId === 'new' ? 'New configuration' : s.subsidiary_text || 'Edit configuration'}</h1>
         </div>
       </div>
 
@@ -206,31 +206,31 @@ define([
         <input type="hidden" name="oa_subsidiary_name" id="oa_subsidiary_name" value="${s.subsidiary_text || ''}">
 
         <div class="card section">
-          <h2>Generelle indstillinger</h2>
+          <h2>General settings</h2>
           <div class="form-grid">
             <div class="form-group">
               <label>Subsidiary *</label>
               ${subsidiarySelect('oa_subsidiary', s.subsidiary)}
             </div>
             <div class="form-group">
-              <label>Antal godkendere</label>
+              <label>Number of approvers</label>
               <select name="oa_approver_count">
-                <option value="1" ${s.approver_count == 1 ? 'selected' : ''}>1 — Et trin</option>
-                <option value="2" ${s.approver_count == 2 ? 'selected' : ''}>2 — To trin</option>
+                <option value="1" ${s.approver_count == 1 ? 'selected' : ''}>1 — Single step</option>
+                <option value="2" ${s.approver_count == 2 ? 'selected' : ''}>2 — Two step</option>
               </select>
             </div>
             <div class="form-group toggle-row">
-              <label>Aktiver PO godkendelse</label>
+              <label>Enable PO approval</label>
               <label class="toggle"><input type="checkbox" name="oa_enable_po_cb" onchange="syncHidden(this,'oa_enable_po')" ${s.enable_po ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_enable_po" value="${s.enable_po ? 'T' : 'F'}">
             </div>
             <div class="form-group toggle-row">
-              <label>Aktiver Vendor Bill godkendelse</label>
+              <label>Enable Vendor Bill approval</label>
               <label class="toggle"><input type="checkbox" name="oa_enable_vb_cb" onchange="syncHidden(this,'oa_enable_vb')" ${s.enable_vb ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_enable_vb" value="${s.enable_vb ? 'T' : 'F'}">
             </div>
             <div class="form-group toggle-row">
-              <label>Brug beløbstærskler</label>
+              <label>Use amount thresholds</label>
               <label class="toggle"><input type="checkbox" name="oa_use_amount_cb" onchange="syncHidden(this,'oa_use_amount')" ${s.use_amount ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_use_amount" value="${s.use_amount ? 'T' : 'F'}">
             </div>
@@ -238,49 +238,49 @@ define([
         </div>
 
         <div class="card section">
-          <h2>Godkendere</h2>
+          <h2>Approvers</h2>
           <div class="form-grid">
             <div class="form-group">
-              <label>Standard godkender 1 *</label>
+              <label>Default approver 1 *</label>
               ${employeeSelect('oa_default_approver1', s.default_approver1)}
             </div>
             <div class="form-group">
-              <label>Standard godkender 2 <span class="muted">(kun ved 2-trins)</span></label>
+              <label>Default approver 2 <span class="muted">(2-step only)</span></label>
               ${employeeSelect('oa_default_approver2', s.default_approver2)}
             </div>
           </div>
         </div>
 
         <div class="card section">
-          <h2>Email & knapper</h2>
+          <h2>Email & buttons</h2>
           <div class="form-grid">
             <div class="form-group toggle-row">
-              <label>Aktiver email godkendelse</label>
+              <label>Enable email approval</label>
               <label class="toggle"><input type="checkbox" name="oa_email_enabled_cb" onchange="syncHidden(this,'oa_email_enabled')" ${s.email_enabled ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_email_enabled" value="${s.email_enabled ? 'T' : 'F'}">
             </div>
             <div class="form-group">
-              <label>Token udløber (dage)</label>
+              <label>Token expires (days)</label>
               <input type="number" name="oa_token_expiry_days" value="${(s.token_expiry_days || typeof s.token_expiry_days === 'number') ? s.token_expiry_days : 7}" min="1" max="30">
             </div>
             <div class="form-group">
-              <label>Godkend-knap tekst</label>
-              <input type="text" name="oa_approve_string" value="${s.approve_string || 'Godkend'}">
+              <label>Approve button text</label>
+              <input type="text" name="oa_approve_string" value="${s.approve_string || 'Approve'}">
             </div>
             <div class="form-group">
-              <label>Afvis-knap tekst</label>
-              <input type="text" name="oa_reject_string" value="${s.reject_string || 'Afvis'}">
+              <label>Reject button text</label>
+              <input type="text" name="oa_reject_string" value="${s.reject_string || 'Reject'}">
             </div>
           </div>
         </div>
 
         <div class="form-actions">
-          <a href="${selfUrl}" class="btn-secondary">Annuller</a>
-          <button type="submit" class="btn-primary">Gem indstillinger</button>
+          <a href="${selfUrl}" class="btn-secondary">Cancel</a>
+          <button type="submit" class="btn-primary">Save settings</button>
         </div>
 
-        ${renderMatrix('vb', 'Godkendelsesmatrix — Vendor Bills', vbRows, useAmount, enableVb)}
-        ${renderMatrix('po', 'Godkendelsesmatrix — Purchase Orders', poRows, useAmount, enablePo)}
+        ${renderMatrix('vb', 'Approval Matrix — Vendor Bills', vbRows, useAmount, enableVb)}
+        ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo)}
       </form>
 
       <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" style="display:none"></div>
@@ -290,7 +290,7 @@ define([
   // ─── Employee dropdown helper ─────────────────────────────────────────────────
 
   function employeeSelect(fieldName, selectedId) {
-    const opts = ['<option value="">— Vælg medarbejder —</option>'];
+    const opts = ['<option value="">— Select employee —</option>'];
     search.create({
       type:    'employee',
       filters: [['isinactive', 'is', 'F']],
@@ -306,7 +306,7 @@ define([
   // ─── Subsidiary dropdown helper ───────────────────────────────────────────────
 
   function subsidiarySelect(fieldName, selectedId) {
-    const opts = ['<option value="">— Vælg subsidiary —</option>'];
+    const opts = ['<option value="">— Select subsidiary —</option>'];
     try {
       search.create({
         type:    'subsidiary',
@@ -331,7 +331,7 @@ define([
           <td class="amount-col"${colStyle}><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
-          <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Slet</button></td>
+          <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Delete</button></td>
         </tr>`;
     }).join('');
     return `<div class="matrix-wrapper" data-type="${prefix}"${isEnabled ? '' : ' style="display:none"'}>
@@ -339,23 +339,23 @@ define([
         <div class="section-header">
           <div>
             <h2 style="margin-bottom:4px">${title}</h2>
-            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Sorteres stigende — næste rækkes beløb er øvre grænse.</p>
+            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Sorted ascending — next row's amount is the upper limit.</p>
           </div>
-          <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Tilføj regel</button>
+          <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Add rule</button>
         </div>
         <input type="hidden" name="${prefix}_row_count" id="${prefix}_row_count" value="${rows.length}">
         <div class="table-scroll">
           <table class="data-table">
             <thead><tr>
-              <th class="amount-col"${colStyle} style="width:150px">Beløb fra</th>
-              <th>Godkender 1</th>
-              <th>Godkender 2 <span style="font-weight:normal;color:#aaa">(valgfri)</span></th>
+              <th class="amount-col"${colStyle} style="width:150px">Amount from</th>
+              <th>Approver 1</th>
+              <th>Approver 2 <span style="font-weight:normal;color:#aaa">(optional)</span></th>
               <th style="width:60px"></th>
             </tr></thead>
             <tbody id="${prefix}-matrix-body">${rowsHtml}</tbody>
           </table>
         </div>
-        ${rows.length === 0 ? `<p id="${prefix}-empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>` : ''}
+        ${rows.length === 0 ? `<p id="${prefix}-empty-msg" class="muted" style="text-align:center;padding:20px 0">No rules. Click &quot;+ Add rule&quot;.</p>` : ''}
       </div>
     </div>`;
   }
@@ -438,7 +438,7 @@ define([
         submittedIds.push(parsedId);
       } else {
         t = record.create({ type: C.RECORDS.THRESHOLD, isDynamic: false });
-        t.setValue({ fieldId: 'name', value: 'Tærskel ' + (i + 1) });
+        t.setValue({ fieldId: 'name', value: 'Threshold ' + (i + 1) });
       }
 
       t.setValue({ fieldId: C.FIELDS.THRESHOLD.HIERARCHY,  value: hierarchyId });
@@ -463,10 +463,10 @@ define([
   function _shell(title, body, selfUrl, jsUrl) {
     const listUrl = selfUrl || '';
     const breadcrumb = listUrl
-      ? `<a href="${listUrl}" class="topbar-link">Omnit Approvals</a><span class="topbar-sep">›</span><span class="topbar-title">Indstillinger</span>`
-      : `<span class="topbar-title">Omnit Approvals › Indstillinger</span>`;
+      ? `<a href="${listUrl}" class="topbar-link">Omnit Approvals</a><span class="topbar-sep">›</span><span class="topbar-title">Settings</span>`
+      : `<span class="topbar-title">Omnit Approvals › Settings</span>`;
     return `<!DOCTYPE html>
-<html lang="da">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -539,7 +539,7 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   }
 
   function renderError(msg, selfUrl) {
-    return _shell('Fejl', `<div class="card"><h2>Fejl</h2><p style="color:#c74634">${msg}</p><br><a href="${selfUrl}" class="link">← Tilbage</a></div>`, selfUrl);
+    return _shell('Error', `<div class="card"><h2>Error</h2><p style="color:#c74634">${msg}</p><br><a href="${selfUrl}" class="link">← Back</a></div>`, selfUrl);
   }
 
   return { onRequest };

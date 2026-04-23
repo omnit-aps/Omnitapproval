@@ -81,7 +81,7 @@
     var hid = document.createElement('input');
     hid.type = 'hidden'; hid.name = p + '_row_' + i + '_id'; hid.value = 'new';
     var btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'btn-link-danger'; btn.textContent = 'Slet';
+    btn.type = 'button'; btn.className = 'btn-link-danger'; btn.textContent = 'Delete';
     btn.addEventListener('click', (function (prefix) {
       return function () { window.deleteRow(this, prefix); };
     })(p));
