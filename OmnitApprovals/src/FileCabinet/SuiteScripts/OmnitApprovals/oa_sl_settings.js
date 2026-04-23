@@ -121,7 +121,8 @@ define([
 
   function renderEditPage(settingsId, selfUrl) {
     let s = {};
-    let matrixRows = [];
+    let poRows = [];
+    let vbRows = [];
 
     if (settingsId !== 'new') {
       try {
@@ -129,33 +130,43 @@ define([
         Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => { s[k.toLowerCase()] = rec.getValue(fid); });
         s.subsidiary_text = rec.getText(C.FIELDS.SETTINGS.SUBSIDIARY);
 
-        search.create({
-          type:    C.RECORDS.HIERARCHY,
-          filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
-          columns: ['internalid']
-        }).run().each(hr => {
-          // Collect IDs + sort_order first, then record.load each for reliable SELECT values
-          const tIds = [];
+        const loadRowsForType = (recordType) => {
+          const rows = [];
           search.create({
-            type:    C.RECORDS.THRESHOLD,
-            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
-            columns: ['internalid', C.FIELDS.THRESHOLD.SORT_ORDER]
-          }).run().each(t => {
-            tIds.push({ id: parseInt(t.id, 10), sortOrder: parseInt(t.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0 });
-            return true;
-          });
-          tIds.sort((a, b) => a.sortOrder - b.sortOrder);
-          tIds.forEach(({ id }) => {
-            const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
-            matrixRows.push({
-              id:        String(id),
-              minAmount: String(t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0),
-              approver1: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || ''),
-              approver2: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || '')
+            type:    C.RECORDS.HIERARCHY,
+            filters: [
+              [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
+              'AND',
+              [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', recordType]
+            ],
+            columns: ['internalid']
+          }).run().each(hr => {
+            const tIds = [];
+            search.create({
+              type:    C.RECORDS.THRESHOLD,
+              filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
+              columns: ['internalid', C.FIELDS.THRESHOLD.SORT_ORDER]
+            }).run().each(t => {
+              tIds.push({ id: parseInt(t.id, 10), sortOrder: parseInt(t.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0 });
+              return true;
             });
+            tIds.sort((a, b) => a.sortOrder - b.sortOrder);
+            tIds.forEach(({ id }) => {
+              const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
+              rows.push({
+                id:        String(id),
+                minAmount: String(t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0),
+                approver1: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || ''),
+                approver2: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || '')
+              });
+            });
+            return false;
           });
-          return false;
-        });
+          return rows;
+        };
+
+        poRows = loadRowsForType(C.HIERARCHY_RECORD_TYPES.PO);
+        vbRows = loadRowsForType(C.HIERARCHY_RECORD_TYPES.VB);
       } catch (e) {
         return renderError(`Konfiguration med ID ${settingsId} ikke fundet.`, selfUrl);
       }
@@ -172,14 +183,9 @@ define([
       return true;
     });
     const empOptsJson = JSON.stringify(empOpts.join(''));
-
-    const rowsHtml = matrixRows.map((row, i) => `
-      <tr data-row="${i}">
-        <td><input type="number" name="row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
-        <td>${employeeSelect('row_' + i + '_approver1', row.approver1)}</td>
-        <td>${employeeSelect('row_' + i + '_approver2', row.approver2)}</td>
-        <td><input type="hidden" name="row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this)">Slet</button></td>
-      </tr>`).join('');
+    const useAmount   = !!s.use_amount;
+    const enablePo    = !!s.enable_po;
+    const enableVb    = !!s.enable_vb;
 
     return _shell(`${settingsId === 'new' ? 'Ny' : 'Rediger'} konfiguration`, `
       <div class="page-header">
@@ -192,7 +198,6 @@ define([
       <form method="POST" action="${selfUrl}" onsubmit="syncRowCount()">
         <input type="hidden" name="oa_settings_id" value="${settingsId}">
         <input type="hidden" name="oa_subsidiary_name" id="oa_subsidiary_name" value="${s.subsidiary_text || ''}">
-        <input type="hidden" name="row_count" id="row_count" value="${matrixRows.length}">
 
         <div class="card section">
           <h2>Generelle indstillinger</h2>
@@ -268,61 +273,50 @@ define([
           <button type="submit" class="btn-primary">Gem indstillinger</button>
         </div>
 
-        <div class="card section">
-          <div class="section-header">
-          <div>
-            <h2 style="margin-bottom:4px">Godkendelsesmatrix</h2>
-            <p class="muted">Regler sorteres efter beløbsgrænse. Godkender 2 kræver "To trin".</p>
-          </div>
-          <button type="button" class="btn-primary" onclick="addRow()">+ Tilføj regel</button>
-        </div>
-        <div class="table-scroll">
-          <table class="data-table" id="matrix-table">
-            <thead><tr>
-              <th style="width:150px">Beløb fra</th>
-              <th>Godkender 1</th>
-              <th>Godkender 2 <span style="font-weight:normal;color:#aaa">(valgfri)</span></th>
-              <th style="width:60px"></th>
-            </tr></thead>
-            <tbody id="matrix-body">${rowsHtml}</tbody>
-          </table>
-        </div>
-        ${matrixRows.length === 0 ? '<p id="empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>' : ''}
-        </div>
+        ${enableVb ? renderMatrix('vb', 'Godkendelsesmatrix — Vendor Bills', vbRows, useAmount) : ''}
+        ${enablePo ? renderMatrix('po', 'Godkendelsesmatrix — Purchase Orders', poRows, useAmount) : ''}
+        ${!enableVb && !enablePo ? '<div class="card section"><p class="muted" style="text-align:center;padding:20px 0">Aktiver Vendor Bill- eller PO-godkendelse ovenfor for at se godkendelsesmatrix.</p></div>' : ''}
       </form>
 
       <script>
-      var _rowCounter = ${matrixRows.length};
+      var _counters = { po: ${poRows.length}, vb: ${vbRows.length} };
       var _empOptions = ${empOptsJson};
-      function addRow() {
-        var i = _rowCounter++;
-        var em = document.getElementById('empty-msg');
+      var _useAmount = ${useAmount ? 'true' : 'false'};
+      function addRow(prefix) {
+        var i = _counters[prefix]++;
+        var em = document.getElementById(prefix + '-empty-msg');
         if (em) em.style.display = 'none';
+        var amountCell = _useAmount
+          ? '<td><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>'
+          : '<input type="hidden" name="' + prefix + '_row_' + i + '_min" value="0">';
         var tr = document.createElement('tr');
         tr.setAttribute('data-row', i);
-        tr.innerHTML =
-          '<td><input type="number" name="row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>' +
-          '<td><select name="row_' + i + '_approver1">' + _empOptions + '</select></td>' +
-          '<td><select name="row_' + i + '_approver2">' + _empOptions + '</select></td>' +
-          '<td><input type="hidden" name="row_' + i + '_id" value="new">' +
-              '<button type="button" class="btn-link-danger" onclick="deleteRow(this)">Slet</button></td>';
-        document.getElementById('matrix-body').appendChild(tr);
+        tr.innerHTML = amountCell +
+          '<td><select name="' + prefix + '_row_' + i + '_approver1">' + _empOptions + '</select></td>' +
+          '<td><select name="' + prefix + '_row_' + i + '_approver2">' + _empOptions + '</select></td>' +
+          '<td><input type="hidden" name="' + prefix + '_row_' + i + '_id" value="new">' +
+              '<button type="button" class="btn-link-danger" onclick="deleteRow(this,\'' + prefix + '\')">Slet</button></td>';
+        document.getElementById(prefix + '-matrix-body').appendChild(tr);
       }
-      function deleteRow(btn) {
+      function deleteRow(btn, prefix) {
         btn.closest('tr').remove();
-        reindexRows();
+        reindexRows(prefix);
       }
-      function reindexRows() {
-        var rows = document.querySelectorAll('#matrix-body tr');
+      function reindexRows(prefix) {
+        var rows = document.querySelectorAll('#' + prefix + '-matrix-body tr');
         rows.forEach(function(tr, idx) {
           tr.setAttribute('data-row', idx);
           tr.querySelectorAll('input[name], select[name]').forEach(function(el) {
-            el.name = el.name.replace(/^row_\d+_/, 'row_' + idx + '_');
+            el.name = el.name.replace(new RegExp('^' + prefix + '_row_\\d+_'), prefix + '_row_' + idx + '_');
           });
         });
-        document.getElementById('row_count').value = rows.length;
+        var countEl = document.getElementById(prefix + '_row_count');
+        if (countEl) countEl.value = rows.length;
       }
-      function syncRowCount() { reindexRows(); }
+      function syncRowCount() { reindexRows('po'); reindexRows('vb'); }
+      function syncHidden(cb, name) {
+        document.querySelector('[name="' + name + '"]').value = cb.checked ? 'T' : 'F';
+      }
       var subSel = document.querySelector('[name="oa_subsidiary"]');
       if (subSel) subSel.addEventListener('change', function() {
         var opt = this.options[this.selectedIndex];
@@ -366,15 +360,64 @@ define([
     return `<select name="${fieldName}" required>${opts.join('')}</select>`;
   }
 
+  // ─── Matrix HTML helper ───────────────────────────────────────────────────────
+
+  function renderMatrix(prefix, title, rows, useAmount) {
+    const amountHeader = useAmount ? '<th style="width:150px">Beløb fra</th>' : '';
+    const amountHint   = useAmount ? '<p class="muted" style="margin-top:2px;font-size:12px">Sorteres stigende — næste rækkes beløb er øvre grænse.</p>' : '';
+    const rowsHtml = rows.map((row, i) => {
+      const amountCell = useAmount
+        ? `<td><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>`
+        : `<input type="hidden" name="${prefix}_row_${i}_min" value="0">`;
+      return `<tr data-row="${i}">
+          ${amountCell}
+          <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
+          <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
+          <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Slet</button></td>
+        </tr>`;
+    }).join('');
+    return `<div class="card section">
+        <div class="section-header">
+          <div>
+            <h2 style="margin-bottom:4px">${title}</h2>
+            ${amountHint}
+          </div>
+          <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Tilføj regel</button>
+        </div>
+        <input type="hidden" name="${prefix}_row_count" id="${prefix}_row_count" value="${rows.length}">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr>
+              ${amountHeader}
+              <th>Godkender 1</th>
+              <th>Godkender 2 <span style="font-weight:normal;color:#aaa">(valgfri)</span></th>
+              <th style="width:60px"></th>
+            </tr></thead>
+            <tbody id="${prefix}-matrix-body">${rowsHtml}</tbody>
+          </table>
+        </div>
+        ${rows.length === 0 ? `<p id="${prefix}-empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>` : ''}
+      </div>`;
+  }
+
   // ─── Matrix save helper ───────────────────────────────────────────────────────
 
   function saveMatrixRows(settingsId, p) {
-    const rowCount = parseInt(p.row_count, 10) || 0;
+    if (p.oa_enable_po === 'T') saveMatrixRowsForType(settingsId, p, 'po', C.HIERARCHY_RECORD_TYPES.PO);
+    if (p.oa_enable_vb === 'T') saveMatrixRowsForType(settingsId, p, 'vb', C.HIERARCHY_RECORD_TYPES.VB);
+  }
+
+  function saveMatrixRowsForType(settingsId, p, prefix, recordType) {
+    const rowCount = parseInt(p[prefix + '_row_count'], 10) || 0;
 
     let hierarchyId = null;
     search.create({
       type:    C.RECORDS.HIERARCHY,
-      filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
+      filters: [
+        [C.FIELDS.HIERARCHY.SETTINGS,    'anyof', settingsId],
+        'AND',
+        [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', recordType]
+      ],
       columns: ['internalid']
     }).run().each(r => { hierarchyId = parseInt(r.id, 10); return false; });
 
@@ -394,10 +437,10 @@ define([
 
     if (!hierarchyId) {
       const h = record.create({ type: C.RECORDS.HIERARCHY, isDynamic: false });
-      h.setValue({ fieldId: 'name',                          value: 'Auto' });
+      h.setValue({ fieldId: 'name',                          value: 'Auto-' + prefix.toUpperCase() });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.SETTINGS,     value: settingsId });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.STATUS,       value: C.HIERARCHY_STATUS.ACTIVE });
-      h.setValue({ fieldId: C.FIELDS.HIERARCHY.RECORD_TYPE,  value: C.HIERARCHY_RECORD_TYPES.BOTH });
+      h.setValue({ fieldId: C.FIELDS.HIERARCHY.RECORD_TYPE,  value: recordType });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.HIGHEST_ONLY, value: false });
       h.setValue({ fieldId: C.FIELDS.HIERARCHY.START_DATE,   value: new Date() });
       hierarchyId = h.save();
@@ -412,17 +455,17 @@ define([
 
     const submittedIds = [];
     for (let i = 0; i < rowCount; i++) {
-      const rowId        = p[`row_${i}_id`];
-      const rowMin       = parseFloat(p[`row_${i}_min`]) || 0;
-      const rowApprover1 = parseInt(p[`row_${i}_approver1`], 10) || null;
-      const rowApprover2 = parseInt(p[`row_${i}_approver2`], 10) || null;
+      const rowId        = p[prefix + '_row_' + i + '_id'];
+      const rowMin       = parseFloat(p[prefix + '_row_' + i + '_min']) || 0;
+      const rowApprover1 = parseInt(p[prefix + '_row_' + i + '_approver1'], 10) || null;
+      const rowApprover2 = parseInt(p[prefix + '_row_' + i + '_approver2'], 10) || null;
 
       if (!rowApprover1) continue;
 
       let rowMax = null;
       for (let j = i + 1; j < rowCount; j++) {
-        const nextA1  = parseInt(p[`row_${j}_approver1`], 10);
-        const nextMin = parseFloat(p[`row_${j}_min`]);
+        const nextA1  = parseInt(p[prefix + '_row_' + j + '_approver1'], 10);
+        const nextMin = parseFloat(p[prefix + '_row_' + j + '_min']);
         if (nextA1 && !isNaN(nextMin)) { rowMax = nextMin - 0.01; break; }
       }
 
@@ -524,11 +567,6 @@ define([
   <span class="topbar-title">Omnit Approvals — Indstillinger</span>
 </div>
 <div class="main">${body}</div>
-<script>
-function syncHidden(cb, name) {
-  document.querySelector('[name="'+name+'"]').value = cb.checked ? 'T' : 'F';
-}
-</script>
 </body></html>`;
   }
 
