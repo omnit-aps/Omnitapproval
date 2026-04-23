@@ -114,7 +114,7 @@ define([
           </tr></thead>
           <tbody>${tableRows || '<tr><td colspan="6" class="empty">Ingen konfigurationer endnu.</td></tr>'}</tbody>
         </table>
-      </div>`);
+      </div>`, selfUrl);
   }
 
   // ─── Edit View ────────────────────────────────────────────────────────────────
@@ -273,9 +273,8 @@ define([
           <button type="submit" class="btn-primary">Gem indstillinger</button>
         </div>
 
-        ${enableVb ? renderMatrix('vb', 'Godkendelsesmatrix — Vendor Bills', vbRows, useAmount) : ''}
-        ${enablePo ? renderMatrix('po', 'Godkendelsesmatrix — Purchase Orders', poRows, useAmount) : ''}
-        ${!enableVb && !enablePo ? '<div class="card section"><p class="muted" style="text-align:center;padding:20px 0">Aktiver Vendor Bill- eller PO-godkendelse ovenfor for at se godkendelsesmatrix.</p></div>' : ''}
+        ${renderMatrix('vb', 'Godkendelsesmatrix — Vendor Bills', vbRows, useAmount, enableVb)}
+        ${renderMatrix('po', 'Godkendelsesmatrix — Purchase Orders', poRows, useAmount, enablePo)}
       </form>
 
       <script>
@@ -286,12 +285,11 @@ define([
         var i = _counters[prefix]++;
         var em = document.getElementById(prefix + '-empty-msg');
         if (em) em.style.display = 'none';
-        var amountCell = _useAmount
-          ? '<td><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>'
-          : '<input type="hidden" name="' + prefix + '_row_' + i + '_min" value="0">';
+        var amountDisplay = _useAmount ? '' : 'display:none;';
         var tr = document.createElement('tr');
         tr.setAttribute('data-row', i);
-        tr.innerHTML = amountCell +
+        tr.innerHTML =
+          '<td class="amount-col" style="' + amountDisplay + '"><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"></td>' +
           '<td><select name="' + prefix + '_row_' + i + '_approver1">' + _empOptions + '</select></td>' +
           '<td><select name="' + prefix + '_row_' + i + '_approver2">' + _empOptions + '</select></td>' +
           '<td><input type="hidden" name="' + prefix + '_row_' + i + '_id" value="new">' +
@@ -314,15 +312,28 @@ define([
         if (countEl) countEl.value = rows.length;
       }
       function syncRowCount() { reindexRows('po'); reindexRows('vb'); }
+      function setAmountCols(show) {
+        document.querySelectorAll('.amount-col').forEach(function(el) {
+          el.style.display = show ? '' : 'none';
+        });
+        _useAmount = show;
+      }
       function syncHidden(cb, name) {
         document.querySelector('[name="' + name + '"]').value = cb.checked ? 'T' : 'F';
+        if (name === 'oa_enable_vb' || name === 'oa_enable_po') {
+          var prefix = name === 'oa_enable_vb' ? 'vb' : 'po';
+          var wrapper = document.querySelector('.matrix-wrapper[data-type="' + prefix + '"]');
+          if (wrapper) wrapper.style.display = cb.checked ? '' : 'none';
+        } else if (name === 'oa_use_amount') {
+          setAmountCols(cb.checked);
+        }
       }
       var subSel = document.querySelector('[name="oa_subsidiary"]');
       if (subSel) subSel.addEventListener('change', function() {
         var opt = this.options[this.selectedIndex];
         document.getElementById('oa_subsidiary_name').value = opt ? opt.text : '';
       });
-      </script>`);
+      </script>`, selfUrl);
   }
 
   // ─── Employee dropdown helper ─────────────────────────────────────────────────
@@ -362,25 +373,22 @@ define([
 
   // ─── Matrix HTML helper ───────────────────────────────────────────────────────
 
-  function renderMatrix(prefix, title, rows, useAmount) {
-    const amountHeader = useAmount ? '<th style="width:150px">Beløb fra</th>' : '';
-    const amountHint   = useAmount ? '<p class="muted" style="margin-top:2px;font-size:12px">Sorteres stigende — næste rækkes beløb er øvre grænse.</p>' : '';
+  function renderMatrix(prefix, title, rows, useAmount, isEnabled) {
+    const colStyle  = useAmount ? '' : ' style="display:none"';
     const rowsHtml = rows.map((row, i) => {
-      const amountCell = useAmount
-        ? `<td><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>`
-        : `<input type="hidden" name="${prefix}_row_${i}_min" value="0">`;
       return `<tr data-row="${i}">
-          ${amountCell}
+          <td class="amount-col"${colStyle}><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
           <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Slet</button></td>
         </tr>`;
     }).join('');
-    return `<div class="card section">
+    return `<div class="matrix-wrapper" data-type="${prefix}"${isEnabled ? '' : ' style="display:none"'}>
+      <div class="card section">
         <div class="section-header">
           <div>
             <h2 style="margin-bottom:4px">${title}</h2>
-            ${amountHint}
+            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Sorteres stigende — næste rækkes beløb er øvre grænse.</p>
           </div>
           <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Tilføj regel</button>
         </div>
@@ -388,7 +396,7 @@ define([
         <div class="table-scroll">
           <table class="data-table">
             <thead><tr>
-              ${amountHeader}
+              <th class="amount-col"${colStyle} style="width:150px">Beløb fra</th>
               <th>Godkender 1</th>
               <th>Godkender 2 <span style="font-weight:normal;color:#aaa">(valgfri)</span></th>
               <th style="width:60px"></th>
@@ -397,7 +405,8 @@ define([
           </table>
         </div>
         ${rows.length === 0 ? `<p id="${prefix}-empty-msg" class="muted" style="text-align:center;padding:20px 0">Ingen regler. Klik "+ Tilføj regel".</p>` : ''}
-      </div>`;
+      </div>
+    </div>`;
   }
 
   // ─── Matrix save helper ───────────────────────────────────────────────────────
@@ -498,7 +507,11 @@ define([
 
   // ─── Shell / CSS ─────────────────────────────────────────────────────────────
 
-  function _shell(title, body) {
+  function _shell(title, body, selfUrl) {
+    const listUrl = selfUrl || '';
+    const breadcrumb = listUrl
+      ? `<a href="${listUrl}" class="topbar-link">Omnit Approvals</a><span class="topbar-sep">›</span><span class="topbar-title">Indstillinger</span>`
+      : `<span class="topbar-title">Omnit Approvals › Indstillinger</span>`;
     return `<!DOCTYPE html>
 <html lang="da">
 <head>
@@ -512,6 +525,7 @@ define([
   .topbar-logo{color:#c74634;font-weight:700;font-size:16px;letter-spacing:.5px}
   .topbar-sep{color:#666;font-size:18px}
   .topbar-title{color:#ccc;font-size:14px}
+  .topbar-link{color:#ccc;font-size:14px;text-decoration:none}.topbar-link:hover{color:#fff;text-decoration:underline}
   .main{max-width:1100px;margin:0 auto;padding:32px 24px}
   .page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px}
   h1{font-size:24px;font-weight:700;color:#312d2a}
@@ -555,23 +569,23 @@ define([
   .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
   .muted{color:#aaa;font-size:13px}
   .table-scroll{overflow-x:auto}
-  #matrix-body select{width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit}
-  #matrix-body select:focus{border-color:#c74634;outline:none}
+  .data-table tbody select{width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit}
+  .data-table tbody select:focus{border-color:#c74634;outline:none}
   .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
 </style>
 </head>
 <body>
 <div class="topbar">
   <span class="topbar-logo">OMNI:T</span>
-  <span class="topbar-sep">/</span>
-  <span class="topbar-title">Omnit Approvals — Indstillinger</span>
+  <span class="topbar-sep">›</span>
+  ${breadcrumb}
 </div>
 <div class="main">${body}</div>
 </body></html>`;
   }
 
   function renderError(msg, selfUrl) {
-    return _shell('Fejl', `<div class="card"><h2>Fejl</h2><p style="color:#c74634">${msg}</p><br><a href="${selfUrl}" class="link">← Tilbage</a></div>`);
+    return _shell('Fejl', `<div class="card"><h2>Fejl</h2><p style="color:#c74634">${msg}</p><br><a href="${selfUrl}" class="link">← Tilbage</a></div>`, selfUrl);
   }
 
   return { onRequest };

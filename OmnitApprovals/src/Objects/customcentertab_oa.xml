@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <customcentertab scriptid="custcentertab_oa">
   <label>Omnit Approvals</label>
-  <center>CENTER_ACCOUNTING</center>
+  <center>CENTER_CLASSIC</center>
   <visible>T</visible>
 </customcentertab>
