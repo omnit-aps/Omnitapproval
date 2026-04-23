@@ -4,4 +4,14 @@
   <fieldtype>SELECT</fieldtype>
   <selectrecordtype>-4</selectrecordtype>
   <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <appliestopurchaseorder>T</appliestopurchaseorder>
+  <appliestovendorbill>T</appliestovendorbill>
+  <appliestosalesorder>F</appliestosalesorder>
+  <appliestoinvoice>F</appliestoinvoice>
+  <appliestocreditnote>F</appliestocreditnote>
+  <appliestoexpensereport>F</appliestoexpensereport>
+  <appliestojournalentry>F</appliestojournalentry>
+  <appliestopayment>F</appliestopayment>
+  <appliestoreturnauthorization>F</appliestoreturnauthorization>
 </transactionbodycustomfield>
