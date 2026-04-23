@@ -58,6 +58,14 @@ define([
     }
 
     const settings   = _loadSettings(fields['subsidiary'] && fields['subsidiary'][0] && fields['subsidiary'][0].value);
+
+    // For unauthenticated (no-login) requests, the subsidiary setting must explicitly allow it.
+    // runtime.getCurrentUser().id returns -4 for anonymous external suitelet access.
+    if (runtime.getCurrentUser().id <= 0 && !(settings && settings.approve_without_login)) {
+      resp.write(_errorPage('Approval without login is not enabled for this subsidiary. Please log in to NetSuite to approve this transaction.'));
+      return;
+    }
+
     const expiryDays = (settings && settings.token_expiry_days) ? parseInt(settings.token_expiry_days, 10) : 7;
 
     if (utils.isTokenExpired(fields[C.FIELDS.TRANSACTION.TOKEN_CREATED], expiryDays)) {

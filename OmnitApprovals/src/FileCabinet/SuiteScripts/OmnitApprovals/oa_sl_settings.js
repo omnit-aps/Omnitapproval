@@ -68,8 +68,9 @@ define([
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_ENABLED,     value: p.oa_email_enabled === 'T' });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.TOKEN_EXPIRY_DAYS, value: parseInt(p.oa_token_expiry_days, 10) || 7 });
       rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_SENDER,      value: parseInt(p.oa_email_sender, 10) || '' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_SUBJECT,     value: p.oa_email_subject || '' });
-      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_INTRO,       value: p.oa_email_intro   || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_SUBJECT,          value: p.oa_email_subject || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.EMAIL_INTRO,            value: p.oa_email_intro   || '' });
+      rec.setValue({ fieldId: C.FIELDS.SETTINGS.APPROVE_WITHOUT_LOGIN,  value: p.oa_approve_without_login === 'T' });
       const savedId = rec.save();
 
       saveMatrixRows(savedId, p);
@@ -352,6 +353,14 @@ define([
               </div>
               <label class="toggle"><input type="checkbox" name="oa_email_enabled_cb" onchange="syncHidden(this,'oa_email_enabled')" ${s.email_enabled ? 'checked' : ''}><span class="slider"></span></label>
               <input type="hidden" name="oa_email_enabled" value="${s.email_enabled ? 'T' : 'F'}">
+            </div>
+            <div class="form-group toggle-row">
+              <div>
+                <label style="margin-bottom:2px">Approve without login</label>
+                <span class="field-help">When on, approvers can click the email link and approve or reject without having a NetSuite login. The token in the link is the only authentication. Requires the email action suitelet deployment to have "Available Without Login" enabled in NetSuite.</span>
+              </div>
+              <label class="toggle"><input type="checkbox" name="oa_approve_without_login_cb" onchange="syncHidden(this,'oa_approve_without_login')" ${s.approve_without_login ? 'checked' : ''}><span class="slider"></span></label>
+              <input type="hidden" name="oa_approve_without_login" value="${s.approve_without_login ? 'T' : 'F'}">
             </div>
             <div class="form-group">
               <label>Email sender (From)</label>

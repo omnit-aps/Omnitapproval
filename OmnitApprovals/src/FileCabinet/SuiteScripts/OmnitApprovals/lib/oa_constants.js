@@ -27,8 +27,9 @@ define([], () => {
         EMAIL_ENABLED:     'custrecord_oa_email_enabled',
         TOKEN_EXPIRY_DAYS: 'custrecord_oa_token_expiry_days',
         EMAIL_SENDER:      'custrecord_oa_email_sender',
-        EMAIL_SUBJECT:     'custrecord_oa_email_subject',
-        EMAIL_INTRO:       'custrecord_oa_email_intro'
+        EMAIL_SUBJECT:          'custrecord_oa_email_subject',
+        EMAIL_INTRO:            'custrecord_oa_email_intro',
+        APPROVE_WITHOUT_LOGIN:  'custrecord_oa_approve_without_login'
       },
       HIERARCHY: {
         SETTINGS:     'custrecord_oah_settings',

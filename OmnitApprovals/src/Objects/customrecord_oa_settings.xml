@@ -91,5 +91,11 @@
       <ismandatory>F</ismandatory>
       <defaultvalue>A new {recordType} from {subsidiary} has been entered in NetSuite and requires your approval. Please see the attached document for full details.</defaultvalue>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_approve_without_login">
+      <label>Approve Without Login</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>
