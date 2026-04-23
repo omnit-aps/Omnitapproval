@@ -502,11 +502,10 @@
 
 ## 15. Edge Cases
 
-### UAT-066 — Approval routing when no active hierarchy exists
-**Steps:** Delete or inactivate all hierarchy records for a subsidiary. Create a PO.
-**Expected:** Falls back to default approver from settings. If no default approver is set, `approver1` remains empty and the transaction pends with no assigned approver. No crash.
-**Coverage:** ⚠️
-**Gap:** If neither a matching threshold nor a default approver is configured, the transaction will sit pending with no approver and no notification. Consider adding a validation on settings save that requires a default approver.
+### UAT-066 — Default approver required when approval is enabled
+**Steps:** In settings, enable PO or VB approval but leave Default Approver 1 blank. Click Save.
+**Expected:** Error: "A Default Approver 1 is required when approval is enabled for any transaction type." Settings are not saved.
+**Coverage:** ✅
 
 ---
 
@@ -526,11 +525,10 @@
 
 ---
 
-### UAT-069 — Two settings records for the same subsidiary
-**Steps:** Create two settings records both pointing to the same subsidiary.
-**Expected:** The engine uses `run().each()` and takes the first result. Whichever record has the lower internal ID will be used. The second record is silently ignored.
-**Coverage:** ⚠️
-**Gap:** No uniqueness validation on subsidiary in settings. The settings suitelet should warn or block duplicate subsidiaries on save.
+### UAT-069 — Two settings records for the same subsidiary are blocked
+**Steps:** A settings record for Subsidiary A already exists. Try to create a second one for Subsidiary A.
+**Expected:** Error: "A configuration already exists for this subsidiary." Save is blocked.
+**Coverage:** ✅
 
 ---
 
@@ -555,11 +553,10 @@
 
 ---
 
-### UAT-073 — Suitelet actions blocked for wrong user via POST
-**Steps:** Employee B POSTs to email action suitelet with action=approve for a transaction where Employee A is the approver.
-**Expected:** Engine's `processApproval` uses the posting user's ID (Employee B). The approval is recorded as Employee B's action. There is no "are you the assigned approver?" check in the engine — only the UI hides buttons from non-approvers.
-**Coverage:** ⚠️
-**Gap:** A user who constructs a manual POST can approve a transaction they are not assigned to. Consider adding an `actorId === currentApprover` guard inside `processApproval` for Phase 2.
+### UAT-073 — Engine blocks approval by non-assigned approver
+**Steps:** Employee B POSTs to email action suitelet with action=approve for a transaction where Employee A is the assigned approver.
+**Expected:** Engine returns `{ success: false, message: 'You are not the assigned approver for this step.' }`. Transaction unchanged.
+**Coverage:** ✅
 
 ---
 
@@ -569,13 +566,13 @@ The following are not in scope for Phase 1 but should be considered before going
 
 | # | Gap | Risk if not addressed |
 |---|-----|-----------------------|
-| 1 | No uniqueness check on subsidiary in settings | Silent misconfiguration if two records exist for same subsidiary |
+| 1 | ~~No uniqueness check on subsidiary~~ | Fixed — duplicate subsidiary blocked on save |
 | 2 | Matrix dropdowns not filtered by `is_approver` flag | Any active employee can be set as approver in matrix |
-| 3 | No server-side "are you the assigned approver?" check in engine | Determined user can approve via manual POST |
+| 3 | ~~No server-side approver guard in engine~~ | Fixed — `processApproval` and `processDecline` check actorId === assignedApprover |
 | 4 | No per-approver activity report | Audit trail exists in logs but requires a custom saved search to query |
 | 5 | No overdue/escalation tracking | Transactions can sit pending indefinitely with no alert |
-| 6 | No default approver validation on settings save | Misconfigured subsidiary silently routes nowhere |
-| 7 | Hierarchy date ranges stored but not enforced by engine | Date-scoped rules have no effect at runtime |
+| 6 | ~~No default approver validation on settings save~~ | Fixed — save blocked if approval enabled without default approver |
+| 7 | ~~Hierarchy date ranges not enforced~~ | Already enforced — `getActiveHierarchy` filters by START_DATE/END_DATE |
 | 8 | No automatic hierarchy expiry when saving new matrix | Old hierarchies must be manually marked Expired |
 | 9 | No bulk action from email (magic keywords) | Email-only approvers must click a link, not reply |
 | 10 | No line-level threshold routing | Header amount only; line-item variance not supported |

@@ -48,6 +48,30 @@ define([
     // Save settings
     const settingsId = p.oa_settings_id;
     try {
+      // Validate: default approver required when any approval type is enabled
+      if ((p.oa_enable_po === 'T' || p.oa_enable_vb === 'T') && !parseInt(p.oa_default_approver1, 10)) {
+        resp.write(renderError('A Default Approver 1 is required when approval is enabled for any transaction type.', selfUrl));
+        return;
+      }
+
+      // Validate: only one settings record per subsidiary
+      const subsidiaryId = parseInt(p.oa_subsidiary, 10);
+      if (subsidiaryId) {
+        let dupFound = false;
+        search.create({
+          type:    C.RECORDS.SETTINGS,
+          filters: [[C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId]],
+          columns: ['internalid']
+        }).run().each(r => {
+          if (String(r.id) !== String(settingsId)) { dupFound = true; }
+          return !dupFound;
+        });
+        if (dupFound) {
+          resp.write(renderError('A configuration already exists for this subsidiary. Each subsidiary can only have one configuration.', selfUrl));
+          return;
+        }
+      }
+
       let rec;
       if (settingsId && settingsId !== 'new') {
         rec = record.load({ type: C.RECORDS.SETTINGS, id: settingsId, isDynamic: false });

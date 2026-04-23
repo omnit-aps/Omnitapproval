@@ -160,11 +160,16 @@ define([
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    const currentStep = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
-    const approver2   = txn.getValue(C.FIELDS.TRANSACTION.APPROVER2);
+    const currentStep       = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
+    const approver2         = txn.getValue(C.FIELDS.TRANSACTION.APPROVER2);
+    const stepApproverField = currentStep === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
+    const assignedApprover  = txn.getValue(stepApproverField);
 
     if (currentStep !== parseInt(step, 10)) {
       return { success: false, message: 'Step mismatch — record may have already been processed.' };
+    }
+    if (!assignedApprover || String(assignedApprover) !== String(actorId)) {
+      return { success: false, message: 'You are not the assigned approver for this step.' };
     }
 
     if (step === 1 && approver2) {
@@ -204,7 +209,12 @@ define([
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    const step = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
+    const step              = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
+    const declineApprField  = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
+    const assignedDecliner  = txn.getValue(declineApprField);
+    if (!assignedDecliner || String(assignedDecliner) !== String(actorId)) {
+      return { success: false, message: 'You are not the assigned approver for this step.' };
+    }
 
     txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.REJECTED });
     txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: '' });
