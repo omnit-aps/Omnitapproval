@@ -190,8 +190,9 @@ define([
         const subCur = search.lookupFields({ type: 'subsidiary', id: s.subsidiary, columns: ['currency'] });
         const curArr = subCur.currency;
         if (curArr && curArr[0]) {
-          const curFields = search.lookupFields({ type: 'currency', id: curArr[0].value, columns: ['symbol'] });
-          baseCurrency = curFields.symbol || curArr[0].text || '';
+          // Try 'isocode' (ISO 4217 code like DKK/USD); fall back to the currency's display name
+          const curFields = search.lookupFields({ type: 'currency', id: curArr[0].value, columns: ['isocode', 'symbol'] });
+          baseCurrency = curFields.isocode || curFields.symbol || curArr[0].text || '';
         }
       } catch (e) { /* OneWorld not available — graceful fallback */ }
     }

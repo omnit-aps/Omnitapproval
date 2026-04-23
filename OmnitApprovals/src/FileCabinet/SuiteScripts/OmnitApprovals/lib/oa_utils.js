@@ -34,10 +34,10 @@ define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
   }
 
   function getTransactionAmount(recordType, recordId) {
-    // basetotalamount = total in subsidiary base currency; falls back to amount for single-currency accounts
-    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount', 'basetotalamount'] });
-    const base   = parseFloat(result.basetotalamount);
-    return (!isNaN(base) && base > 0) ? base : (parseFloat(result.amount) || 0);
+    // 'amount' in a transaction search is the base currency total.
+    // 'fxamount' is the transaction (foreign) currency total — not what we want.
+    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount'] });
+    return parseFloat(result.amount) || 0;
   }
 
   function lookupEmployeeField(employeeId, fieldId) {
