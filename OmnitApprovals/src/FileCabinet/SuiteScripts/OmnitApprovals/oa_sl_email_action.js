@@ -76,7 +76,8 @@ define([
     if (action === 'approve') {
       // Find approver from step field to use as actor
       const approverField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const actorId = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const approverArr1 = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const actorId = Array.isArray(approverArr1) && approverArr1[0] ? approverArr1[0].value : null;
       engine.processApproval(recordId, recordType, actorId, step, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('approve'));
       return;
@@ -127,7 +128,8 @@ define([
 
       const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
       const approverField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const actorId = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const approverArr2 = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
+      const actorId = Array.isArray(approverArr2) && approverArr2[0] ? approverArr2[0].value : null;
       engine.processDecline(recordId, recordType, actorId, comment, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('decline'));
       return;
