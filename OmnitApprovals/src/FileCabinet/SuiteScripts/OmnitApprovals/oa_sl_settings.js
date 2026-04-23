@@ -7,9 +7,10 @@ define([
   'N/record',
   'N/search',
   'N/url',
+  'N/file',
   './lib/oa_constants',
   './oa_engine'
-], (record, search, url, C, engine) => {
+], (record, search, url, nsFile, C, engine) => {
   'use strict';
 
   function onRequest(context) {
@@ -26,8 +27,13 @@ define([
     const settingsId = req.parameters.oa_settings_id;
     const selfUrl    = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
 
+    let jsUrl = '';
+    try {
+      jsUrl = nsFile.load({ id: 'SuiteScripts/OmnitApprovals/oa_sl_settings_client.js' }).url;
+    } catch (e) { /* file not deployed yet — graceful degradation */ }
+
     if (view === 'edit' && settingsId) {
-      resp.write(renderEditPage(settingsId, selfUrl));
+      resp.write(renderEditPage(settingsId, selfUrl, jsUrl));
     } else {
       resp.write(renderListPage(selfUrl));
     }
@@ -119,7 +125,7 @@ define([
 
   // ─── Edit View ────────────────────────────────────────────────────────────────
 
-  function renderEditPage(settingsId, selfUrl) {
+  function renderEditPage(settingsId, selfUrl, jsUrl) {
     let s = {};
     let poRows = [];
     let vbRows = [];
@@ -182,7 +188,7 @@ define([
       empOpts.push(`<option value="${r.id}">${r.getValue('entityid').replace(/"/g, '&quot;')}</option>`);
       return true;
     });
-    const empOptsJson = JSON.stringify(empOpts.join(''));
+    const empOptsHtml = empOpts.join('');
     const useAmount   = !!s.use_amount;
     const enablePo    = !!s.enable_po;
     const enableVb    = !!s.enable_vb;
@@ -277,16 +283,8 @@ define([
         ${renderMatrix('po', 'Godkendelsesmatrix — Purchase Orders', poRows, useAmount, enablePo)}
       </form>
 
-      <script>
-      var _counters = { po: ${poRows.length}, vb: ${vbRows.length} };
-      var _empOptions = ${empOptsJson};
-      var _useAmount = ${useAmount ? 'true' : 'false'};
-      var subSel = document.querySelector('[name="oa_subsidiary"]');
-      if (subSel) subSel.addEventListener('change', function() {
-        var opt = this.options[this.selectedIndex];
-        document.getElementById('oa_subsidiary_name').value = opt ? opt.text : '';
-      });
-      </script>`, selfUrl);
+      <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" style="display:none"></div>
+      <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>`, selfUrl, jsUrl);
   }
 
   // ─── Employee dropdown helper ─────────────────────────────────────────────────
@@ -460,7 +458,7 @@ define([
 
   // ─── Shell / CSS ─────────────────────────────────────────────────────────────
 
-  function _shell(title, body, selfUrl) {
+  function _shell(title, body, selfUrl, jsUrl) {
     const listUrl = selfUrl || '';
     const breadcrumb = listUrl
       ? `<a href="${listUrl}" class="topbar-link">Omnit Approvals</a><span class="topbar-sep">›</span><span class="topbar-title">Indstillinger</span>`
@@ -471,6 +469,7 @@ define([
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
+${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#f0efee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#312d2a;font-size:14px}
@@ -526,55 +525,6 @@ define([
   .data-table tbody select:focus{border-color:#c74634;outline:none}
   .matrix-num{width:120px!important;padding:6px 10px!important;border:1px solid #ddd!important;border-radius:6px!important;font-size:13px!important}
 </style>
-<script>
-function addRow(prefix) {
-  var i = _counters[prefix]++;
-  var em = document.getElementById(prefix + '-empty-msg');
-  if (em) em.style.display = 'none';
-  var amountDisplay = _useAmount ? '' : 'display:none;';
-  var tr = document.createElement('tr');
-  tr.setAttribute('data-row', i);
-  tr.innerHTML =
-    '<td class="amount-col" style="' + amountDisplay + '"><input type="number" name="' + prefix + '_row_' + i + '_min" value="0" min="0" step="0.01" class="matrix-num"><\/td>' +
-    '<td><select name="' + prefix + '_row_' + i + '_approver1">' + _empOptions + '<\/select><\/td>' +
-    '<td><select name="' + prefix + '_row_' + i + '_approver2">' + _empOptions + '<\/select><\/td>' +
-    '<td><input type="hidden" name="' + prefix + '_row_' + i + '_id" value="new">' +
-        '<button type="button" class="btn-link-danger" onclick="deleteRow(this,\'' + prefix + '\')">Slet<\/button><\/td>';
-  document.getElementById(prefix + '-matrix-body').appendChild(tr);
-}
-function deleteRow(btn, prefix) {
-  btn.closest('tr').remove();
-  reindexRows(prefix);
-}
-function reindexRows(prefix) {
-  var rows = document.querySelectorAll('#' + prefix + '-matrix-body tr');
-  rows.forEach(function(tr, idx) {
-    tr.setAttribute('data-row', idx);
-    tr.querySelectorAll('input[name], select[name]').forEach(function(el) {
-      el.name = el.name.replace(new RegExp('^' + prefix + '_row_\\d+_'), prefix + '_row_' + idx + '_');
-    });
-  });
-  var countEl = document.getElementById(prefix + '_row_count');
-  if (countEl) countEl.value = rows.length;
-}
-function syncRowCount() { reindexRows('po'); reindexRows('vb'); }
-function setAmountCols(show) {
-  document.querySelectorAll('.amount-col').forEach(function(el) {
-    el.style.display = show ? '' : 'none';
-  });
-  _useAmount = show;
-}
-function syncHidden(cb, name) {
-  document.querySelector('[name="' + name + '"]').value = cb.checked ? 'T' : 'F';
-  if (name === 'oa_enable_vb' || name === 'oa_enable_po') {
-    var pfx = name === 'oa_enable_vb' ? 'vb' : 'po';
-    var wrapper = document.querySelector('.matrix-wrapper[data-type="' + pfx + '"]');
-    if (wrapper) wrapper.style.display = cb.checked ? '' : 'none';
-  } else if (name === 'oa_use_amount') {
-    setAmountCols(cb.checked);
-  }
-}
-</script>
 </head>
 <body>
 <div class="topbar">
