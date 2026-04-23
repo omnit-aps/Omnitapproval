@@ -183,6 +183,65 @@ define([
       }
     }
 
+    // Load expired/draft hierarchies for the history section (read-only)
+    let poHistory = [];
+    let vbHistory = [];
+    if (settingsId !== 'new') {
+      const loadHistoryForType = (recordType) => {
+        const result = [];
+        search.create({
+          type:    C.RECORDS.HIERARCHY,
+          filters: [
+            [C.FIELDS.HIERARCHY.SETTINGS,    'equalto', settingsId],
+            'AND',
+            [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',      recordType],
+            'AND',
+            [C.FIELDS.HIERARCHY.STATUS,      'isnot',   C.HIERARCHY_STATUS.ACTIVE]
+          ],
+          columns: [
+            'internalid',
+            C.FIELDS.HIERARCHY.NAME,
+            C.FIELDS.HIERARCHY.STATUS,
+            C.FIELDS.HIERARCHY.START_DATE,
+            C.FIELDS.HIERARCHY.END_DATE
+          ]
+        }).run().each(hr => {
+          const statusVal = hr.getValue(C.FIELDS.HIERARCHY.STATUS);
+          const rows = [];
+          search.create({
+            type:    C.RECORDS.THRESHOLD,
+            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
+            columns: ['internalid', C.FIELDS.THRESHOLD.SORT_ORDER]
+          }).run().each(t => {
+            rows.push({ id: parseInt(t.id, 10), sortOrder: parseInt(t.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0 });
+            return true;
+          });
+          rows.sort((a, b) => a.sortOrder - b.sortOrder);
+          const thresholds = rows.map(({ id }) => {
+            try {
+              const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
+              return {
+                minAmount: t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0,
+                approver1: t.getText(C.FIELDS.THRESHOLD.APPROVER)  || '—',
+                approver2: t.getText(C.FIELDS.THRESHOLD.APPROVER2) || ''
+              };
+            } catch (e) { return null; }
+          }).filter(Boolean);
+          result.push({
+            name:      hr.getValue(C.FIELDS.HIERARCHY.NAME) || `Hierarchy ${hr.id}`,
+            status:    statusVal === C.HIERARCHY_STATUS.DRAFT ? 'Draft' : 'Expired',
+            startDate: hr.getValue(C.FIELDS.HIERARCHY.START_DATE) || '',
+            endDate:   hr.getValue(C.FIELDS.HIERARCHY.END_DATE)   || '',
+            thresholds
+          });
+          return true;
+        });
+        return result;
+      };
+      try { poHistory = loadHistoryForType(C.HIERARCHY_RECORD_TYPES.PO); } catch (e) {}
+      try { vbHistory = loadHistoryForType(C.HIERARCHY_RECORD_TYPES.VB); } catch (e) {}
+    }
+
     // Look up the subsidiary's base currency symbol for display in the matrix
     let baseCurrency = '';
     if (s.subsidiary) {
@@ -336,6 +395,9 @@ define([
         ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo, baseCurrency)}
       </form>
 
+      ${renderHistorySection('Purchase Orders', poHistory, useAmount, baseCurrency)}
+      ${renderHistorySection('Vendor Bills',    vbHistory, useAmount, baseCurrency)}
+
       <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" data-currency="${baseCurrency}" style="display:none"></div>
       <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>`, selfUrl, jsUrl);
   }
@@ -418,6 +480,49 @@ define([
         </div>
         ${rows.length === 0 ? `<p id="${prefix}-empty-msg" class="muted" style="text-align:center;padding:20px 0">No rules. Click &quot;+ Add rule&quot;.</p>` : ''}
       </div>
+    </div>`;
+  }
+
+  // ─── History section (read-only expired/draft hierarchies) ───────────────────
+
+  function renderHistorySection(typeLabel, historyItems, useAmount, currency) {
+    if (!historyItems || historyItems.length === 0) return '';
+    const amountHdr = `Amount from${currency ? ' (' + currency + ')' : ''}`;
+    const colStyle  = useAmount ? '' : ' style="display:none"';
+    const items = historyItems.map(h => {
+      const dateRange = [h.startDate, h.endDate].filter(Boolean).join(' – ') || '—';
+      const pill = h.status === 'Expired'
+        ? `<span style="background:#c7463418;color:#c74634;border:1px solid #c7463430;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600">${h.status}</span>`
+        : `<span style="background:#d9770618;color:#d97706;border:1px solid #d9770630;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600">${h.status}</span>`;
+      const rows = h.thresholds.length ? h.thresholds.map(t =>
+        `<tr>
+          <td${colStyle}>${Number(t.minAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+          <td>${t.approver1}</td>
+          <td>${t.approver2 || '<span style="color:#bbb">—</span>'}</td>
+        </tr>`
+      ).join('') : `<tr><td colspan="3" style="color:#bbb;text-align:center;padding:16px;font-style:italic">No threshold rules.</td></tr>`;
+      return `<div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:14px;font-weight:600;color:#312d2a">${h.name}</span>
+          ${pill}
+          <span style="font-size:12px;color:#888">${dateRange}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f9f9f9">
+              <th${colStyle} style="text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">${amountHdr}</th>
+              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Approver 1</th>
+              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Approver 2</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="card section" style="margin-top:24px">
+      <h2 style="margin-bottom:4px">Matrix history — ${typeLabel}</h2>
+      <p class="muted" style="margin-bottom:20px;font-size:12px">Past approval matrices that are no longer active. Read-only reference.</p>
+      ${items}
     </div>`;
   }
 

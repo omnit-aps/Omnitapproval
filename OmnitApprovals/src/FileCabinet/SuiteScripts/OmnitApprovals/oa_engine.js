@@ -283,8 +283,9 @@ define([
       rec.setValue({ fieldId: C.FIELDS.LOG.ACTOR,       value: p.actorId });
       rec.setValue({ fieldId: C.FIELDS.LOG.STEP,        value: p.step || 1 });
       rec.setValue({ fieldId: C.FIELDS.LOG.SOURCE,      value: p.source || C.LOG_SOURCES.NETSUITE });
-      if (p.targetId) rec.setValue({ fieldId: C.FIELDS.LOG.TARGET,  value: p.targetId });
-      if (p.comment)  rec.setValue({ fieldId: C.FIELDS.LOG.COMMENT, value: p.comment });
+      if (p.targetId) rec.setValue({ fieldId: C.FIELDS.LOG.TARGET,     value: p.targetId });
+      if (p.comment)  rec.setValue({ fieldId: C.FIELDS.LOG.COMMENT,    value: p.comment });
+      rec.setValue({ fieldId: C.FIELDS.LOG.TIMESTAMP, value: new Date() });
       return rec.save();
     } catch (e) {
       log.error('OA: Audit log save failed', e.message);

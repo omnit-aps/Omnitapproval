@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suitelet scriptid="customscript_oa_sl_approval_history">
+  <name>OA - Approval History</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_sl_approval_history.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_sl_approval_history">
+      <status>RELEASED</status>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>T</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+  </scriptdeployments>
+</suitelet>

@@ -120,5 +120,13 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
     });
   }
 
-  return { pageInit, OA_approve, OA_decline, OA_delegate, OA_reset, OA_reassign };
+  function OA_history(histUrl, recordId, recordType) {
+    window.open(
+      histUrl + '&oa_record_id=' + encodeURIComponent(recordId) + '&oa_record_type=' + encodeURIComponent(recordType),
+      '_blank',
+      'width=960,height=700,resizable=yes,scrollbars=yes'
+    );
+  }
+
+  return { pageInit, OA_approve, OA_decline, OA_delegate, OA_reset, OA_reassign, OA_history };
 });

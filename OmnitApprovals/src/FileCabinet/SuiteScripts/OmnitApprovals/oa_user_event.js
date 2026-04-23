@@ -110,13 +110,28 @@ define([
     const approver1 = rec.getValue(C.FIELDS.TRANSACTION.APPROVER1);
     const approver2 = rec.getValue(C.FIELDS.TRANSACTION.APPROVER2);
     const status    = rec.getValue('approvalstatus');
+    const submittedBy = rec.getValue(C.FIELDS.TRANSACTION.SUBMITTED_BY);
+
+    // Show approval history button for any record that has been through the OA flow
+    if (submittedBy) {
+      const histUrl = url.resolveScript({
+        scriptId:     'customscript_oa_sl_approval_history',
+        deploymentId: 'customdeploy_oa_sl_approval_history',
+        returnExternalUrl: false
+      });
+      form.addButton({
+        id:           'custpage_oa_history',
+        label:        'Approval history',
+        functionName: `OA_history('${histUrl}', '${rec.id}', '${rec.type}')`
+      });
+    }
 
     if (status !== C.APPROVAL_STATUS.PENDING || !step) return;
 
-    const currentApprover = step === 1 ? approver1 : approver2;
+    const currentApprover   = step === 1 ? approver1 : approver2;
     const isCurrentApprover = String(currentApprover) === String(userId);
-    const canDelegate    = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE);
-    const isManager      = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER);
+    const canDelegate       = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE);
+    const isManager         = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER);
 
     // Load button labels from settings
     const subsidiaryId = utils.getTransactionSubsidiary(rec.type, rec.id);
