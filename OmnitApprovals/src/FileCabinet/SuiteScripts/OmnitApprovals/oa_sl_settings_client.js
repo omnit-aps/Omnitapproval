@@ -6,8 +6,9 @@
 (function () {
   'use strict';
 
-  var _c  = { po: 0, vb: 0 };
-  var _ua = false;
+  var _c   = { po: 0, vb: 0 };
+  var _ua  = false;
+  var _cur = '';
 
   // ─── Initialise (runs after DOM ready) ───────────────────────────────────────
 
@@ -17,6 +18,7 @@
       _c.po = +(d.getAttribute('data-po-count') || 0);
       _c.vb = +(d.getAttribute('data-vb-count') || 0);
       _ua   = d.getAttribute('data-use-amount') === 'true';
+      _cur  = d.getAttribute('data-currency') || '';
     }
 
     updatePriorityButtons('po');
@@ -96,11 +98,19 @@
     var td1 = document.createElement('td');
     td1.className = 'amount-col';
     if (!_ua) td1.style.display = 'none';
+    var wrap = document.createElement('span');
+    wrap.className = 'amount-wrap';
     var inp = document.createElement('input');
     inp.type = 'number';
     inp.name = p + '_row_' + i + '_min';
     inp.value = '0'; inp.min = '0'; inp.step = '0.01'; inp.className = 'matrix-num';
-    td1.appendChild(inp);
+    wrap.appendChild(inp);
+    if (_cur) {
+      var tag = document.createElement('span');
+      tag.className = 'currency-tag'; tag.textContent = _cur;
+      wrap.appendChild(tag);
+    }
+    td1.appendChild(wrap);
 
     // Approver 1
     var td2  = document.createElement('td');

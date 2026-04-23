@@ -34,8 +34,10 @@ define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
   }
 
   function getTransactionAmount(recordType, recordId) {
-    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount'] });
-    return parseFloat(result.amount) || 0;
+    // basetotalamount = total in subsidiary base currency; falls back to amount for single-currency accounts
+    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount', 'basetotalamount'] });
+    const base   = parseFloat(result.basetotalamount);
+    return (!isNaN(base) && base > 0) ? base : (parseFloat(result.amount) || 0);
   }
 
   function lookupEmployeeField(employeeId, fieldId) {
@@ -52,7 +54,7 @@ define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
   }
 
   function formatCurrency(amount, symbol) {
-    return (symbol || '') + ' ' + Number(amount).toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (symbol || '') + ' ' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   return {

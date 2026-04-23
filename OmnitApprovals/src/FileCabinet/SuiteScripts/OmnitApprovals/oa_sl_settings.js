@@ -181,6 +181,19 @@ define([
       }
     }
 
+    // Look up the subsidiary's base currency symbol for display in the matrix
+    let baseCurrency = '';
+    if (s.subsidiary) {
+      try {
+        const subCur = search.lookupFields({ type: 'subsidiary', id: s.subsidiary, columns: ['currency'] });
+        const curArr = subCur.currency;
+        if (curArr && curArr[0]) {
+          const curFields = search.lookupFields({ type: 'currency', id: curArr[0].value, columns: ['symbol'] });
+          baseCurrency = curFields.symbol || curArr[0].text || '';
+        }
+      } catch (e) { /* OneWorld not available — graceful fallback */ }
+    }
+
     // Pre-build employee options HTML for client-side new rows
     const empOpts = ['<option value="">— Select employee —</option>'];
     search.create({
@@ -316,11 +329,11 @@ define([
           <button type="submit" class="btn-primary">Save settings</button>
         </div>
 
-        ${renderMatrix('vb', 'Approval Matrix — Vendor Bills', vbRows, useAmount, enableVb)}
-        ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo)}
+        ${renderMatrix('vb', 'Approval Matrix — Vendor Bills', vbRows, useAmount, enableVb, baseCurrency)}
+        ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo, baseCurrency)}
       </form>
 
-      <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" style="display:none"></div>
+      <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" data-currency="${baseCurrency}" style="display:none"></div>
       <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>`, selfUrl, jsUrl);
   }
 
@@ -361,15 +374,17 @@ define([
 
   // ─── Matrix HTML helper ───────────────────────────────────────────────────────
 
-  function renderMatrix(prefix, title, rows, useAmount, isEnabled) {
-    const colStyle  = useAmount ? '' : ' style="display:none"';
-    const total     = rows.length;
-    const rowsHtml  = rows.map((row, i) => {
-      const upDis   = i === 0        ? ' disabled' : '';
+  function renderMatrix(prefix, title, rows, useAmount, isEnabled, currency) {
+    const colStyle   = useAmount ? '' : ' style="display:none"';
+    const curTag     = currency ? ` <span class="currency-tag">${currency}</span>` : '';
+    const amountHdr  = `Amount from${currency ? ' (' + currency + ')' : ''}`;
+    const total      = rows.length;
+    const rowsHtml   = rows.map((row, i) => {
+      const upDis   = i === 0         ? ' disabled' : '';
       const downDis = i === total - 1 ? ' disabled' : '';
       return `<tr data-row="${i}">
           <td class="prio-col"><button type="button" class="btn-prio" onclick="moveRowUp(this,'${prefix}')"${upDis}>▲</button><button type="button" class="btn-prio" onclick="moveRowDown(this,'${prefix}')"${downDis}>▼</button></td>
-          <td class="amount-col"${colStyle}><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num"></td>
+          <td class="amount-col"${colStyle}><span class="amount-wrap"><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num">${curTag}</span></td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
           <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
           <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Delete</button></td>
@@ -381,7 +396,7 @@ define([
           <div>
             <h2 style="margin-bottom:4px">${title}</h2>
             <p class="muted" style="margin-top:2px;font-size:12px">Row order = priority. Top row wins if two rules overlap. If no rule matches, the default approver above is used.</p>
-            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Amounts are in the subsidiary's base currency. Next row's "Amount from" acts as this row's upper limit.</p>
+            <p class="amount-col muted" style="margin-top:2px;font-size:12px${useAmount ? '' : ';display:none'}">Amounts compared against the transaction's value in the subsidiary's base currency${currency ? ' (' + currency + ')' : ''}. Next row's "Amount from" acts as this row's upper limit.</p>
           </div>
           <button type="button" class="btn-primary" onclick="addRow('${prefix}')">+ Add rule</button>
         </div>
@@ -390,7 +405,7 @@ define([
           <table class="data-table">
             <thead><tr>
               <th class="prio-col" style="width:72px">Priority</th>
-              <th class="amount-col"${colStyle} style="width:150px">Amount from</th>
+              <th class="amount-col"${colStyle} style="width:180px">${amountHdr}</th>
               <th>Approver 1</th>
               <th>Approver 2 <span style="font-weight:normal;color:#aaa">(optional)</span></th>
               <th style="width:60px"></th>
@@ -574,6 +589,8 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   .btn-prio{background:none;border:1px solid #ddd;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;color:#666;line-height:1.4;margin:0 1px}
   .btn-prio:hover:not(:disabled){background:#f5f5f5;border-color:#aaa}
   .btn-prio:disabled{color:#ddd;cursor:default;border-color:#eee}
+  .amount-wrap{display:inline-flex;align-items:center;gap:6px}
+  .currency-tag{display:inline-block;padding:3px 8px;background:#e8f0fe;color:#1a56db;border-radius:5px;font-size:12px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
 </style>
 </head>
 <body>
