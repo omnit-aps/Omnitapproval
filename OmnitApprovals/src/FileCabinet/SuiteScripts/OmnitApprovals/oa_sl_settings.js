@@ -134,22 +134,28 @@ define([
           filters: [[C.FIELDS.HIERARCHY.SETTINGS, 'anyof', settingsId]],
           columns: ['internalid']
         }).run().each(hr => {
+          // Collect IDs + sort_order first, then record.load each for reliable SELECT values
+          const tIds = [];
           search.create({
             type:    C.RECORDS.THRESHOLD,
             filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
-            columns: ['internalid', C.FIELDS.THRESHOLD.MIN_AMOUNT, C.FIELDS.THRESHOLD.APPROVER, C.FIELDS.THRESHOLD.APPROVER2, C.FIELDS.THRESHOLD.SORT_ORDER]
+            columns: ['internalid', C.FIELDS.THRESHOLD.SORT_ORDER]
           }).run().each(t => {
-            matrixRows.push({
-              id:        t.id,
-              minAmount: t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || '0',
-              approver1: t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || '',
-              approver2: t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || ''
-            });
+            tIds.push({ id: parseInt(t.id, 10), sortOrder: parseInt(t.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0 });
             return true;
+          });
+          tIds.sort((a, b) => a.sortOrder - b.sortOrder);
+          tIds.forEach(({ id }) => {
+            const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
+            matrixRows.push({
+              id:        String(id),
+              minAmount: String(t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0),
+              approver1: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER)  || ''),
+              approver2: String(t.getValue(C.FIELDS.THRESHOLD.APPROVER2) || '')
+            });
           });
           return false;
         });
-        matrixRows.sort((a, b) => parseFloat(a.minAmount) - parseFloat(b.minAmount));
       } catch (e) {
         return renderError(`Konfiguration med ID ${settingsId} ikke fundet.`, selfUrl);
       }
