@@ -87,7 +87,7 @@
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_email_intro">
       <label>Email Intro Text</label>
-      <fieldtype>LONGTEXT</fieldtype>
+      <fieldtype>TEXTAREA</fieldtype>
       <ismandatory>F</ismandatory>
       <defaultvalue>A new {recordType} from {subsidiary} has been entered in NetSuite and requires your approval. Please see the attached document for full details.</defaultvalue>
     </customrecordcustomfield>
