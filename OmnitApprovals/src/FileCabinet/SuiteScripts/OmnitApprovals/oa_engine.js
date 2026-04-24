@@ -198,7 +198,12 @@ define([
 
     if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
       _setNextApprover(txn, routing.approver2);
-      txn.save({ ignoreMandatoryFields: true });
+      try {
+        txn.save({ ignoreMandatoryFields: true });
+      } catch (e) {
+        log.error('OA: save failed advancing to step 2', `recordId=${recordId}: ${e.message}`);
+        return { success: false, message: 'Save failed: ' + e.message };
+      }
       createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step: 1, source });
       _scheduleNotification(recordId, recordType);
       return { success: true, nextStep: 2, message: 'Advanced to step 2.' };
@@ -206,7 +211,12 @@ define([
 
     // Final approval
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
-    txn.save({ ignoreMandatoryFields: true });
+    try {
+      txn.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA: save failed on final approval', `recordId=${recordId}: ${e.message}`);
+      return { success: false, message: 'Save failed: ' + e.message };
+    }
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step, source });
     return { success: true, nextStep: null, message: 'Transaction approved.' };
   }
@@ -235,7 +245,12 @@ define([
     const step = _countApprovedLogs(recordId) + 1;
 
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.REJECTED });
-    txn.save({ ignoreMandatoryFields: true });
+    try {
+      txn.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA: save failed on decline', `recordId=${recordId}: ${e.message}`);
+      return { success: false, message: 'Save failed: ' + e.message };
+    }
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.REJECTED, actorId, step, comment, source });
     return { success: true, message: 'Transaction rejected.' };
   }
@@ -257,7 +272,12 @@ define([
 
     const step = _countApprovedLogs(recordId) + 1;
     _setNextApprover(txn, targetId);
-    txn.save({ ignoreMandatoryFields: true });
+    try {
+      txn.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA: save failed on delegation', `recordId=${recordId}: ${e.message}`);
+      return { success: false, message: 'Save failed: ' + e.message };
+    }
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.DELEGATED, actorId, targetId, step });
     _scheduleNotification(recordId, recordType);
@@ -279,7 +299,12 @@ define([
 
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
     _setNextApprover(txn, newApproverId);
-    txn.save({ ignoreMandatoryFields: true });
+    try {
+      txn.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA: save failed on reset', `recordId=${recordId}: ${e.message}`);
+      return { success: false, message: 'Save failed: ' + e.message };
+    }
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.RESET, actorId: managerId, targetId: newApproverId, step: 1 });
     _scheduleNotification(recordId, recordType);
