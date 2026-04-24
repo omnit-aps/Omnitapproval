@@ -1,0 +1,63 @@
+name: Deploy to NetSuite Sandbox
+
+on:
+  push:
+    branches:
+      - claude/omnit-approvals-netsuite-k6BRF
+      - main
+    paths:
+      - 'OmnitApprovals/src/**'
+      - 'OmnitApprovals/deploy.xml'
+      - 'OmnitApprovals/manifest.xml'
+
+jobs:
+  deploy:
+    name: SuiteCloud deploy → TD3075893
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install SuiteCloud CLI
+        run: npm install -g @oracle/suitecloud-cli --acceptsuitecloudsdklicense
+        env:
+          # Suppress interactive prompts during postinstall JAR download
+          CI: true
+
+      - name: Write NetSuite TBA credentials
+        run: |
+          mkdir -p ~/.oracle/netsuite/suitecloud-sdk
+          cat > ~/.oracle/netsuite/suitecloud-sdk/credentials <<'CREDS'
+          {
+            "defaultAuthId": "sandbox",
+            "authIds": {
+              "sandbox": {
+                "accountId": "${{ secrets.NS_ACCOUNT_ID }}",
+                "tokenId": "${{ secrets.NS_TOKEN_ID }}",
+                "tokenSecret": "${{ secrets.NS_TOKEN_SECRET }}",
+                "consumerKey": "${{ secrets.NS_CONSUMER_KEY }}",
+                "consumerSecret": "${{ secrets.NS_CONSUMER_SECRET }}"
+              }
+            }
+          }
+          CREDS
+
+      - name: Deploy to sandbox
+        working-directory: OmnitApprovals
+        run: suitecloud project:deploy --authid sandbox --no-preview
+
+      - name: Report result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Deploy to TD3075893 succeeded on commit ${{ github.sha }}"
+          else
+            echo "❌ Deploy failed — check SuiteCloud output above"
+          fi
