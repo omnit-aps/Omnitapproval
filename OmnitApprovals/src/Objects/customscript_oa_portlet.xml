@@ -2,6 +2,7 @@
 <portlet scriptid="customscript_oa_portlet">
   <name>OA - Pending Approvals</name>
   <scriptfile>[/SuiteScripts/OmnitApprovals/oa_portlet.js]</scriptfile>
+  <portlettype>HTML</portlettype>
   <isinactive>F</isinactive>
   <notifyadmins>F</notifyadmins>
   <notifyowner>T</notifyowner>
