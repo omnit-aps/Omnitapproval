@@ -7,12 +7,11 @@ define([
   'N/record',
   'N/runtime',
   'N/search',
-  'N/https',
   './lib/oa_constants',
   './lib/oa_utils',
   './lib/oa_email_template',
   './oa_engine'
-], (record, runtime, search, https, C, utils, tpl, engine) => {
+], (record, runtime, search, C, utils, tpl, engine) => {
   'use strict';
 
   function onRequest(context) {
@@ -26,77 +25,74 @@ define([
   // ─── GET: email link clicks ───────────────────────────────────────────────────
 
   function handleGet(req, resp) {
-    const token      = req.parameters.oa_token;
-    const action     = req.parameters.oa_action;
-    const recordType = req.parameters.oa_record_type;
-    const recordId   = req.parameters.oa_record_id;
+    const token  = req.parameters.oa_token;
+    const action = req.parameters.oa_action;
 
-    if (!token || !action || !recordType || !recordId) {
+    if (!token || !action) {
       resp.write(_errorPage('Invalid request. Please use the link from your approval email.'));
       return;
     }
 
-    const fields = search.lookupFields({
-      type:    recordType,
-      id:      recordId,
-      columns: [
-        C.FIELDS.TRANSACTION.APPROVAL_TOKEN,
-        C.FIELDS.TRANSACTION.TOKEN_CREATED,
-        C.FIELDS.TRANSACTION.CURRENT_STEP,
-        'approvalstatus',
-        'tranid',
-        'subsidiary',
-        'amount',
-        'currency'
-      ]
-    });
-
-    const storedHash = fields[C.FIELDS.TRANSACTION.APPROVAL_TOKEN];
-    if (!storedHash || utils.hashToken(token) !== storedHash) {
-      resp.write(_errorPage('Invalid or already used token. This link cannot be used again.'));
+    // Verify HMAC token — contains recordType, recordId, step, approverId, expiry
+    const payload = utils.verifyHmacToken(token);
+    if (!payload) {
+      resp.write(_errorPage('This link has expired or is invalid. Please log in to NetSuite to process the transaction.'));
       return;
     }
 
-    const settings   = _loadSettings(fields['subsidiary'] && fields['subsidiary'][0] && fields['subsidiary'][0].value);
+    const recordType = payload.rt;
+    const recordId   = payload.rid;
+    const approverId = payload.aid;
 
-    // For unauthenticated (no-login) requests, the subsidiary setting must explicitly allow it.
-    // runtime.getCurrentUser().id returns -4 for anonymous external suitelet access.
+    // Load live record state to verify current approval status and assigned approver
+    let fields;
+    try {
+      fields = search.lookupFields({
+        type:    recordType,
+        id:      recordId,
+        columns: ['approvalstatus', 'nextapprover', 'tranid', 'subsidiary', 'amount', 'currency']
+      });
+    } catch (e) {
+      resp.write(_errorPage('Transaction not found.'));
+      return;
+    }
+
+    const subsidiaryId   = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].value : null;
+    const subsidiaryName = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].text  : '';
+    const settings       = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
+
+    // For unauthenticated requests check that the subsidiary allows it
     if (runtime.getCurrentUser().id <= 0 && !(settings && settings.approve_without_login)) {
       resp.write(_errorPage('Approval without login is not enabled for this subsidiary. Please log in to NetSuite to approve this transaction.'));
       return;
     }
 
-    const expiryDays = (settings && settings.token_expiry_days) ? parseInt(settings.token_expiry_days, 10) : 7;
-
-    if (utils.isTokenExpired(fields[C.FIELDS.TRANSACTION.TOKEN_CREATED], expiryDays)) {
-      resp.write(_errorPage('This link has expired. Please log in to NetSuite to process the transaction.'));
-      return;
-    }
-
-    if (fields['approvalstatus'] !== C.APPROVAL_STATUS.PENDING) {
+    if (fields.approvalstatus !== C.APPROVAL_STATUS.PENDING) {
       resp.write(_errorPage('This transaction has already been processed.'));
       return;
     }
 
-    const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
+    // Verify the token's approver still matches the live nextapprover on the record
+    const liveApprover = fields.nextapprover && fields.nextapprover[0] ? String(fields.nextapprover[0].value) : null;
+    if (liveApprover !== String(approverId)) {
+      resp.write(_errorPage('This link is no longer valid — the assigned approver has changed. Please log in to NetSuite.'));
+      return;
+    }
 
     if (action === 'approve') {
-      const approverField  = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const approverArr    = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
-      const actorId        = Array.isArray(approverArr) && approverArr[0] ? approverArr[0].value : null;
-      engine.processApproval(recordId, recordType, actorId, step, C.LOG_SOURCES.EMAIL);
+      engine.processApproval(recordId, recordType, approverId, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('approve'));
       return;
     }
 
     if (action === 'decline') {
-      const actionUrl      = _selfUrl(req);
-      const currencyVal    = fields['currency'] && fields['currency'][0] ? fields['currency'][0].text : '';
+      const actionUrl  = req.url.split('?')[0];
+      const currency   = fields.currency && fields.currency[0] ? fields.currency[0].text : '';
       resp.write(tpl.buildDeclineCommentPage({
-        documentNumber: fields['tranid'],
-        subsidiaryName: fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text : '',
-        currency:       currencyVal,
-        amount:         parseFloat(fields['amount']) || 0,
+        documentNumber: fields.tranid,
+        subsidiaryName,
+        currency,
+        amount:      parseFloat(fields.amount) || 0,
         recordType,
         recordId,
         token,
@@ -112,7 +108,7 @@ define([
     const recordId   = req.parameters.oa_record_id;
     const recordType = req.parameters.oa_record_type;
 
-    // Email decline form submit (token-based, no login required)
+    // Email decline form submit — HMAC token authenticates the request
     if (action === 'decline' && req.parameters.oa_token) {
       const token   = req.parameters.oa_token;
       const comment = req.parameters.oa_comment;
@@ -121,33 +117,32 @@ define([
         return;
       }
 
-      const fields = search.lookupFields({
-        type:    recordType,
-        id:      recordId,
-        columns: [C.FIELDS.TRANSACTION.APPROVAL_TOKEN, C.FIELDS.TRANSACTION.TOKEN_CREATED, C.FIELDS.TRANSACTION.CURRENT_STEP]
-      });
-      if (utils.hashToken(token) !== fields[C.FIELDS.TRANSACTION.APPROVAL_TOKEN]) {
-        resp.write(_errorPage('Invalid token.'));
+      const payload = utils.verifyHmacToken(token);
+      if (!payload) {
+        resp.write(_errorPage('This link has expired or is invalid.'));
         return;
       }
 
-      const step          = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
-      const approverField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-      const approverArr   = search.lookupFields({ type: recordType, id: recordId, columns: [approverField] })[approverField];
-      const actorId       = Array.isArray(approverArr) && approverArr[0] ? approverArr[0].value : null;
-      engine.processDecline(recordId, recordType, actorId, comment, C.LOG_SOURCES.EMAIL);
+      // Verify live state
+      const fields       = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['nextapprover', 'approvalstatus'] });
+      const liveApprover = fields.nextapprover && fields.nextapprover[0] ? String(fields.nextapprover[0].value) : null;
+      if (liveApprover !== String(payload.aid)) {
+        resp.write(_errorPage('This link is no longer valid.'));
+        return;
+      }
+
+      engine.processDecline(payload.rid, payload.rt, payload.aid, comment, C.LOG_SOURCES.EMAIL);
       resp.write(tpl.buildConfirmationPage('decline'));
       return;
     }
 
-    // UI-triggered actions (require login)
+    // UI-triggered actions (require an active NetSuite login)
     const userId = runtime.getCurrentUser().id;
-    const step   = parseInt(req.parameters.oa_step, 10) || 1;
     let result;
 
     switch (action) {
       case 'approve':
-        result = engine.processApproval(recordId, recordType, userId, step);
+        result = engine.processApproval(recordId, recordType, userId);
         break;
       case 'decline':
         result = engine.processDecline(recordId, recordType, userId, req.parameters.oa_comment);
@@ -165,15 +160,6 @@ define([
 
     resp.setHeader({ name: 'Content-Type', value: 'application/json' });
     resp.write(JSON.stringify(result));
-  }
-
-  function _selfUrl(req) {
-    return req.url.split('?')[0];
-  }
-
-  function _loadSettings(subsidiaryId) {
-    if (!subsidiaryId) return null;
-    return engine.getSettingsForSubsidiary(subsidiaryId);
   }
 
   function _errorPage(msg) {

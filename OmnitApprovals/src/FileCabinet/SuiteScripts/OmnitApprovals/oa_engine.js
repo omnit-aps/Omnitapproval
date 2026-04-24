@@ -18,7 +18,11 @@ define([
     const results = [];
     search.create({
       type:    C.RECORDS.SETTINGS,
-      filters: [[C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId]],
+      filters: [
+        [C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId],
+        'AND',
+        ['isinactive', 'is', 'F']
+      ],
       columns: Object.values(C.FIELDS.SETTINGS)
     }).run().each(r => { results.push(r); return false; });
 
@@ -41,13 +45,12 @@ define([
     const validTypes = rtMap[recordType] || [];
     if (!validTypes.length) return null;
 
-    // custrecord_oah_settings is INTEGER — must use equalto, not anyof
     const filters = [
       [C.FIELDS.HIERARCHY.SETTINGS, 'equalto', settingsId],
       'AND',
-      [C.FIELDS.HIERARCHY.STATUS, 'is', C.HIERARCHY_STATUS.ACTIVE],
+      [C.FIELDS.HIERARCHY.STATUS, 'anyof', [C.HIERARCHY_STATUS.ACTIVE]],
       'AND',
-      [[C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[0]], 'OR', [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[1]]],
+      [[C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', [validTypes[0]]], 'OR', [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', [validTypes[1]]]],
       'AND',
       [C.FIELDS.HIERARCHY.START_DATE, 'onorbefore', 'today'],
       'AND',
@@ -150,9 +153,25 @@ define([
     return { approver1, approver2, hierarchyId, approverCount, settings };
   }
 
+  // ─── Step helper ─────────────────────────────────────────────────────────────
+
+  function _countApprovedLogs(recordId) {
+    let count = 0;
+    search.create({
+      type:    C.RECORDS.LOG,
+      filters: [
+        [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+        'AND',
+        [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.APPROVED]]
+      ],
+      columns: ['internalid']
+    }).run().each(() => { count++; return true; });
+    return count;
+  }
+
   // ─── Process Approval ────────────────────────────────────────────────────────
 
-  function processApproval(recordId, recordType, actorId, step, source) {
+  function processApproval(recordId, recordType, actorId, source) {
     source = source || C.LOG_SOURCES.NETSUITE;
     let txn;
     try {
@@ -160,40 +179,33 @@ define([
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    const currentStep       = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
-    const approver2         = txn.getValue(C.FIELDS.TRANSACTION.APPROVER2);
-    const stepApproverField = currentStep === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-    const assignedApprover  = txn.getValue(stepApproverField);
 
-    if (currentStep !== parseInt(step, 10)) {
-      return { success: false, message: 'Step mismatch — record may have already been processed.' };
+    const currentApprover = txn.getValue('nextapprover');
+    const approvalStatus  = txn.getValue('approvalstatus');
+
+    if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
+      return { success: false, message: 'Transaction is not pending approval.' };
     }
-    if (!assignedApprover || String(assignedApprover) !== String(actorId)) {
+    if (!currentApprover || String(currentApprover) !== String(actorId)) {
       return { success: false, message: 'You are not the assigned approver for this step.' };
     }
 
-    if (step === 1 && approver2) {
-      // Generate a fresh token for step 2 — invalidates the step-1 email link
-      const rawToken    = utils.generateToken();
-      const hashedToken = utils.hashToken(rawToken);
+    const step = _countApprovedLogs(recordId) + 1;
 
-      txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,   value: 2 });
-      txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN,  value: hashedToken });
-      txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,   value: new Date() });
-      _setNextApprover(txn, approver2);
+    // Check if a step-2 approver is needed
+    const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
+    const routing      = routeForApproval(recordType, recordId, subsidiaryId);
+
+    if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
+      _setNextApprover(txn, routing.approver2);
       txn.save({ ignoreMandatoryFields: true });
-
       createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step: 1, source });
-
-      // Notify step-2 approver by email
-      _scheduleNotification(recordId, recordType, rawToken);
-
+      _scheduleNotification(recordId, recordType);
       return { success: true, nextStep: 2, message: 'Advanced to step 2.' };
     }
 
     // Final approval
-    txn.setValue({ fieldId: 'approvalstatus',                        value: C.APPROVAL_STATUS.APPROVED });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN,     value: '' });
+    txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
     txn.save({ ignoreMandatoryFields: true });
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step, source });
     return { success: true, nextStep: null, message: 'Transaction approved.' };
@@ -209,17 +221,21 @@ define([
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    const step              = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
-    const declineApprField  = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
-    const assignedDecliner  = txn.getValue(declineApprField);
-    if (!assignedDecliner || String(assignedDecliner) !== String(actorId)) {
+
+    const currentApprover = txn.getValue('nextapprover');
+    const approvalStatus  = txn.getValue('approvalstatus');
+
+    if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
+      return { success: false, message: 'Transaction is not pending approval.' };
+    }
+    if (!currentApprover || String(currentApprover) !== String(actorId)) {
       return { success: false, message: 'You are not the assigned approver for this step.' };
     }
 
-    txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.REJECTED });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: '' });
-    txn.save({ ignoreMandatoryFields: true });
+    const step = _countApprovedLogs(recordId) + 1;
 
+    txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.REJECTED });
+    txn.save({ ignoreMandatoryFields: true });
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.REJECTED, actorId, step, comment, source });
     return { success: true, message: 'Transaction rejected.' };
   }
@@ -238,20 +254,13 @@ define([
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    const step      = parseInt(txn.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
-    const stepField = step === 1 ? C.FIELDS.TRANSACTION.APPROVER1 : C.FIELDS.TRANSACTION.APPROVER2;
 
-    const rawToken    = utils.generateToken();
-    const hashedToken = utils.hashToken(rawToken);
-
-    txn.setValue({ fieldId: stepField,                               value: targetId });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN,    value: hashedToken });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,     value: new Date() });
+    const step = _countApprovedLogs(recordId) + 1;
     _setNextApprover(txn, targetId);
     txn.save({ ignoreMandatoryFields: true });
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.DELEGATED, actorId, targetId, step });
-    _scheduleNotification(recordId, recordType, rawToken);
+    _scheduleNotification(recordId, recordType);
     return { success: true, message: 'Delegated successfully.' };
   }
 
@@ -261,25 +270,19 @@ define([
     const isManager = utils.lookupEmployeeField(managerId, C.FIELDS.EMPLOYEE.IS_MANAGER);
     if (!isManager) return { success: false, message: 'Actor is not a manager.' };
 
-    const rawToken    = utils.generateToken();
-    const hashedToken = utils.hashToken(rawToken);
-
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });
     } catch (e) {
       return { success: false, message: 'Record not found.' };
     }
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,   value: 1 });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,      value: newApproverId });
-    txn.setValue({ fieldId: 'approvalstatus',                    value: C.APPROVAL_STATUS.PENDING });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: hashedToken });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,  value: new Date() });
+
+    txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
     _setNextApprover(txn, newApproverId);
     txn.save({ ignoreMandatoryFields: true });
 
     createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.RESET, actorId: managerId, targetId: newApproverId, step: 1 });
-    _scheduleNotification(recordId, recordType, rawToken);
+    _scheduleNotification(recordId, recordType);
     return { success: true, message: 'Flow reset with new approver.' };
   }
 
@@ -293,8 +296,8 @@ define([
       rec.setValue({ fieldId: C.FIELDS.LOG.ACTOR,       value: p.actorId });
       rec.setValue({ fieldId: C.FIELDS.LOG.STEP,        value: p.step || 1 });
       rec.setValue({ fieldId: C.FIELDS.LOG.SOURCE,      value: p.source || C.LOG_SOURCES.NETSUITE });
-      if (p.targetId) rec.setValue({ fieldId: C.FIELDS.LOG.TARGET,     value: p.targetId });
-      if (p.comment)  rec.setValue({ fieldId: C.FIELDS.LOG.COMMENT,    value: p.comment });
+      if (p.targetId) rec.setValue({ fieldId: C.FIELDS.LOG.TARGET,   value: p.targetId });
+      if (p.comment)  rec.setValue({ fieldId: C.FIELDS.LOG.COMMENT,  value: p.comment });
       rec.setValue({ fieldId: C.FIELDS.LOG.TIMESTAMP, value: new Date() });
       return rec.save();
     } catch (e) {
@@ -305,7 +308,6 @@ define([
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-  // nextapprover exists on PO natively but may not exist on VB depending on account config
   function _setNextApprover(txn, employeeId) {
     try {
       txn.setValue({ fieldId: 'nextapprover', value: employeeId });
@@ -314,7 +316,7 @@ define([
     }
   }
 
-  function _scheduleNotification(recordId, recordType, rawToken) {
+  function _scheduleNotification(recordId, recordType) {
     try {
       task.create({
         taskType:    task.TaskType.MAP_REDUCE,
@@ -322,12 +324,11 @@ define([
         deploymentId: 'customdeploy_oa_mr_notifications',
         params: {
           custscript_oa_mr_record_id:   recordId,
-          custscript_oa_mr_record_type: recordType,
-          custscript_oa_mr_raw_token:   rawToken
+          custscript_oa_mr_record_type: recordType
         }
       }).submit();
     } catch (e) {
-      log.error('OA: Failed to schedule step-2 MR notification', e.message);
+      log.error('OA: Failed to schedule MR notification', e.message);
     }
   }
 

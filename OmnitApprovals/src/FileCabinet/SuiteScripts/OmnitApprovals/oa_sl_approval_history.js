@@ -56,21 +56,13 @@ define([
   }
 
   function _render(recordId, recordType) {
-    // ── Transaction summary ───────────────────────────────────────────────────
+    // ── Transaction summary (native fields only) ──────────────────────────────
     const txn = search.lookupFields({
       type:    recordType,
       id:      recordId,
-      columns: [
-        'tranid', 'approvalstatus', 'amount', 'currency', 'subsidiary',
-        C.FIELDS.TRANSACTION.SUBMITTED_BY,
-        C.FIELDS.TRANSACTION.APPROVER1,
-        C.FIELDS.TRANSACTION.APPROVER2,
-        C.FIELDS.TRANSACTION.HIERARCHY_USED,
-        C.FIELDS.TRANSACTION.CURRENT_STEP
-      ]
+      columns: ['tranid', 'approvalstatus', 'amount', 'currency', 'subsidiary', 'nextapprover']
     });
 
-    const _sel  = (f) => txn[f] && txn[f][0] ? txn[f][0].text : '—';
     const docNumber   = txn.tranid || recordId;
     const statusVal   = txn.approvalstatus;
     const statusText  = STATUS_LABELS[statusVal] || statusVal || '—';
@@ -78,7 +70,7 @@ define([
     const subsidiary  = txn.subsidiary && txn.subsidiary[0] ? txn.subsidiary[0].text : '—';
     const amount      = parseFloat(txn.amount) || 0;
     const currency    = txn.currency && txn.currency[0] ? txn.currency[0].text : '';
-    const step        = parseInt(txn[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 0;
+    const nextApprover = txn.nextapprover && txn.nextapprover[0] ? txn.nextapprover[0].text : '—';
     const rtLabel     = recordType === 'purchaseorder' ? 'Purchase Order' : 'Vendor Bill';
 
     // ── Audit log entries ─────────────────────────────────────────────────────
@@ -100,8 +92,8 @@ define([
       const ts = r.getValue(C.FIELDS.LOG.TIMESTAMP) || r.getValue('created');
       logs.push({
         action:    r.getValue(C.FIELDS.LOG.ACTION),
-        actor:     r.getText(C.FIELDS.LOG.ACTOR)   || '—',
-        target:    r.getText(C.FIELDS.LOG.TARGET)  || '',
+        actor:     r.getText(C.FIELDS.LOG.ACTOR)  || '—',
+        target:    r.getText(C.FIELDS.LOG.TARGET) || '',
         step:      r.getValue(C.FIELDS.LOG.STEP),
         source:    r.getValue(C.FIELDS.LOG.SOURCE),
         comment:   r.getValue(C.FIELDS.LOG.COMMENT) || '',
@@ -111,6 +103,12 @@ define([
     });
 
     logs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+    // Derive submitted-by and approver info from log
+    const submittedEntry = logs.find(l => l.action === C.LOG_ACTIONS.SUBMITTED);
+    const submittedBy    = submittedEntry ? submittedEntry.actor : '—';
+    const approver1Entry = logs.find(l => l.action === C.LOG_ACTIONS.APPROVED && l.step === '1');
+    const approver1      = approver1Entry ? approver1Entry.actor : '—';
 
     const logRows = logs.length ? logs.map(l => {
       const label  = ACTION_LABELS[l.action] || l.action;
@@ -129,9 +127,6 @@ define([
         <td class="comment">${l.comment ? `<span class="comment-text">${l.comment}</span>` : ''}</td>
       </tr>`;
     }).join('') : `<tr><td colspan="6" class="empty">No approval activity recorded yet.</td></tr>`;
-
-    // ── Access summary ────────────────────────────────────────────────────────
-    const hierText = _sel(C.FIELDS.TRANSACTION.HIERARCHY_USED);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -186,11 +181,9 @@ define([
   </div>
   <div class="meta">
     <div class="meta-item"><label>Amount (base currency)</label><span>${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></div>
-    <div class="meta-item"><label>Submitted by</label><span>${_sel(C.FIELDS.TRANSACTION.SUBMITTED_BY)}</span></div>
-    <div class="meta-item"><label>Approver 1</label><span>${_sel(C.FIELDS.TRANSACTION.APPROVER1)}</span></div>
-    <div class="meta-item"><label>Approver 2</label><span>${_sel(C.FIELDS.TRANSACTION.APPROVER2)}</span></div>
-    <div class="meta-item"><label>Approval rule used</label><span>${hierText}</span></div>
-    ${step ? `<div class="meta-item"><label>Current step</label><span>${step}</span></div>` : ''}
+    <div class="meta-item"><label>Submitted by</label><span>${submittedBy}</span></div>
+    <div class="meta-item"><label>Approver (step 1)</label><span>${approver1}</span></div>
+    <div class="meta-item"><label>Next approver</label><span>${nextApprover}</span></div>
   </div>
 </div>
 

@@ -6,12 +6,13 @@
 define([
   'N/record',
   'N/runtime',
+  'N/search',
   'N/task',
   'N/url',
   './lib/oa_constants',
   './lib/oa_utils',
   './oa_engine'
-], (record, runtime, task, url, C, utils, engine) => {
+], (record, runtime, search, task, url, C, utils, engine) => {
   'use strict';
 
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
@@ -21,7 +22,6 @@ define([
     if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) return;
 
     const execContext = runtime.executionContext;
-    // Only trigger from UI or web services, not internal system operations
     if (![
       runtime.ContextType.USER_INTERFACE,
       runtime.ContextType.WEBSERVICES,
@@ -34,7 +34,6 @@ define([
 
     const currentStatus = rec.getValue('approvalstatus');
     if (currentStatus === C.APPROVAL_STATUS.APPROVED) return;
-    // On EDIT, skip if already pending — the internal record.save() in afterSubmit would re-trigger this
     if (context.type === TRIGGER.EDIT && currentStatus === C.APPROVAL_STATUS.PENDING) return;
 
     const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
@@ -46,11 +45,7 @@ define([
       return;
     }
 
-    const { approver1, approver2, hierarchyId, approverCount } = result;
-
-    // Generate email token
-    const rawToken = utils.generateToken();
-    const hashedToken = utils.hashToken(rawToken);
+    const { approver1, hierarchyId } = result;
 
     let txn;
     try {
@@ -59,17 +54,12 @@ define([
       log.error('OA: record.load failed in afterSubmit', e.message);
       return;
     }
-    txn.setValue({ fieldId: 'approvalstatus',                         value: C.APPROVAL_STATUS.PENDING });
-    try { txn.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', rec.type); }
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP,        value: 1 });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,           value: approver1 });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2,           value: approver2 || '' });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY,        value: runtime.getCurrentUser().id });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN,      value: hashedToken });
-    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,       value: new Date() });
-    if (hierarchyId) {
-      txn.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId });
-    }
+
+    txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
+    try { txn.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', recordType); }
+    // custbody fields may not exist on all record types — best-effort writes
+    try { txn.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: runtime.getCurrentUser().id }); } catch (e) {}
+    try { if (hierarchyId) txn.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId }); } catch (e) {}
     txn.save({ ignoreMandatoryFields: true });
 
     engine.createAuditLog({
@@ -80,16 +70,14 @@ define([
       source:        C.LOG_SOURCES.NETSUITE
     });
 
-    // Schedule email notification via Map/Reduce (keeps UE within governance limits)
     try {
       task.create({
-        taskType:   task.TaskType.MAP_REDUCE,
-        scriptId:   'customscript_oa_mr_notifications',
+        taskType:    task.TaskType.MAP_REDUCE,
+        scriptId:    'customscript_oa_mr_notifications',
         deploymentId: 'customdeploy_oa_mr_notifications',
         params: {
           custscript_oa_mr_record_id:   recordId,
-          custscript_oa_mr_record_type: recordType,
-          custscript_oa_mr_raw_token:   rawToken
+          custscript_oa_mr_record_type: recordType
         }
       }).submit();
     } catch (e) {
@@ -103,20 +91,25 @@ define([
     if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) return;
     if (runtime.executionContext !== runtime.ContextType.USER_INTERFACE) return;
 
-    const form      = context.form;
-    const rec       = context.newRecord;
-    const userId    = runtime.getCurrentUser().id;
-    const step      = parseInt(rec.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 0;
-    const approver1 = rec.getValue(C.FIELDS.TRANSACTION.APPROVER1);
-    const approver2 = rec.getValue(C.FIELDS.TRANSACTION.APPROVER2);
-    const status    = rec.getValue('approvalstatus');
-    const submittedBy = rec.getValue(C.FIELDS.TRANSACTION.SUBMITTED_BY);
+    const form   = context.form;
+    const rec    = context.newRecord;
+    const userId = runtime.getCurrentUser().id;
+    const status = rec.getValue('approvalstatus');
 
-    // Show approval history button for any record that has been through the OA flow
-    if (submittedBy) {
+    // Show history button when OA audit log entries exist for this record
+    let hasLog = false;
+    try {
+      search.create({
+        type:    C.RECORDS.LOG,
+        filters: [[C.FIELDS.LOG.TRANSACTION, 'anyof', rec.id]],
+        columns: ['internalid']
+      }).run().getRange({ start: 0, end: 1 }).forEach(() => { hasLog = true; });
+    } catch (e) { /* graceful */ }
+
+    if (hasLog) {
       const histUrl = url.resolveScript({
-        scriptId:     'customscript_oa_sl_approval_history',
-        deploymentId: 'customdeploy_oa_sl_approval_history',
+        scriptId:          'customscript_oa_sl_approval_history',
+        deploymentId:      'customdeploy_oa_sl_approval_history',
         returnExternalUrl: false
       });
       form.addButton({
@@ -126,22 +119,22 @@ define([
       });
     }
 
-    if (status !== C.APPROVAL_STATUS.PENDING || !step) return;
+    if (status !== C.APPROVAL_STATUS.PENDING) return;
 
-    const currentApprover   = step === 1 ? approver1 : approver2;
-    const isCurrentApprover = String(currentApprover) === String(userId);
+    // nextapprover is the native NetSuite field — works on both PO and VB
+    const currentApprover   = rec.getValue('nextapprover');
+    const isCurrentApprover = currentApprover && String(currentApprover) === String(userId);
     const canDelegate       = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE);
     const isManager         = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER);
 
-    // Load button labels from settings
     const subsidiaryId = utils.getTransactionSubsidiary(rec.type, rec.id);
     const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
     const approveLabel = (settings && settings.approve_string) || 'Approve';
     const rejectLabel  = (settings && settings.reject_string)  || 'Reject';
 
     const slUrl = url.resolveScript({
-      scriptId:     'customscript_oa_sl_email_action',
-      deploymentId: 'customdeploy_oa_sl_email_action',
+      scriptId:          'customscript_oa_sl_email_action',
+      deploymentId:      'customdeploy_oa_sl_email_action',
       returnExternalUrl: false
     });
 
@@ -154,8 +147,8 @@ define([
     }
 
     if (isManager) {
-      form.addButton({ id: 'custpage_oa_reset',    label: 'Reset flow',  functionName: `OA_reset('${slUrl}')` });
-      form.addButton({ id: 'custpage_oa_reassign', label: 'Reassign',    functionName: `OA_reassign('${slUrl}')` });
+      form.addButton({ id: 'custpage_oa_reset',    label: 'Reset flow', functionName: `OA_reset('${slUrl}')` });
+      form.addButton({ id: 'custpage_oa_reassign', label: 'Reassign',   functionName: `OA_reassign('${slUrl}')` });
     }
   }
 

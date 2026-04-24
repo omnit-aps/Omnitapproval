@@ -20,8 +20,7 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
         _post(slUrl, {
           oa_action:      'approve',
           oa_record_id:   rec.id,
-          oa_record_type: rec.type,
-          oa_step:        rec.getValue({ fieldId: 'custbody_oa_current_step' })
+          oa_record_type: rec.type
         });
       });
   }
@@ -37,7 +36,6 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
           oa_action:      'decline',
           oa_record_id:   rec.id,
           oa_record_type: rec.type,
-          oa_step:        rec.getValue({ fieldId: 'custbody_oa_current_step' }),
           oa_comment:     comment
         });
       });

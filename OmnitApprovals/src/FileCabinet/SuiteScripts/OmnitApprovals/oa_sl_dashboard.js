@@ -43,7 +43,7 @@ define([
       try {
         let result;
         if (a.action === 'approve') {
-          result = engine.processApproval(a.recordId, a.recordType, userId, parseInt(a.step, 10) || 1);
+          result = engine.processApproval(a.recordId, a.recordType, userId);
         } else if (a.action === 'decline') {
           result = engine.processDecline(a.recordId, a.recordType, userId, a.comment || 'Rejected via dashboard');
         } else {
@@ -76,12 +76,9 @@ define([
       ['approvalstatus', 'anyof', approvalStatuses]
     ];
 
+    // Non-managers see only records where they are the current nextapprover
     if (!isManager) {
-      filters.push('AND', [
-        [C.FIELDS.TRANSACTION.APPROVER1, 'anyof', [userId]],
-        'OR',
-        [C.FIELDS.TRANSACTION.APPROVER2, 'anyof', [userId]]
-      ]);
+      filters.push('AND', ['nextapprover', 'anyof', [userId]]);
     }
 
     const rows = [];
@@ -90,10 +87,7 @@ define([
       filters,
       columns: [
         'internalid', 'type', 'tranid', 'entity', 'currency', 'subsidiary',
-        'amount', 'approvalstatus',
-        C.FIELDS.TRANSACTION.CURRENT_STEP,
-        C.FIELDS.TRANSACTION.APPROVER1,
-        C.FIELDS.TRANSACTION.APPROVER2,
+        'amount', 'approvalstatus', 'nextapprover',
         C.FIELDS.TRANSACTION.SUBMITTED_BY,
         { name: 'datecreated' }
       ]
@@ -113,10 +107,9 @@ define([
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
         statusClass: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'badge-orange'
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
-        step:        r.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP),
-        approver1:   r.getText(C.FIELDS.TRANSACTION.APPROVER1),
-        submittedBy: r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY),
-        created:     r.getValue('datecreated')
+        nextApprover: r.getText('nextapprover') || '—',
+        submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY) || '—',
+        created:      r.getValue('datecreated')
       });
       return true;
     });
@@ -134,7 +127,7 @@ define([
     const progress      = totalAll > 0 ? Math.round(((totalAll - totalPending) / totalAll) * 100) : 0;
 
     const tableRows = rows.map(r => `
-      <tr data-id="${r.id}" data-type="${r.type}" data-step="${r.step}">
+      <tr data-id="${r.id}" data-type="${r.type}">
         <td>
           <select class="action-select" data-id="${r.id}">
             <option value="">— Select action —</option>
@@ -151,9 +144,10 @@ define([
         <td>${r.subsidiary}</td>
         <td class="amount">${r.currency} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
         <td>${r.submittedBy || '—'}</td>
+        <td>${r.nextApprover}</td>
         <td class="muted">${r.created || '—'}</td>
         <td><span class="badge ${r.statusClass}">${r.statusLabel}</span></td>
-      </tr>`).join('') || '<tr><td colspan="11" class="empty">No transactions match the filter.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="12" class="empty">No transactions match the filter.</td></tr>';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -271,7 +265,8 @@ define([
         <thead><tr>
           <th>Action</th><th>Reason</th><th>Type</th><th>Vendor</th>
           <th>Document #</th><th>Currency</th><th>Subsidiary</th>
-          <th style="text-align:right">Amount</th><th>Submitted by</th><th>Date</th><th>Status</th>
+          <th style="text-align:right">Amount</th><th>Submitted by</th>
+          <th>Next approver</th><th>Date</th><th>Status</th>
         </tr></thead>
         <tbody id="txn-table">${tableRows}</tbody>
       </table>
@@ -305,14 +300,13 @@ async function submitAll() {
   document.querySelectorAll('tr[data-id]').forEach(row => {
     const id     = row.dataset.id;
     const type   = row.dataset.type;
-    const step   = row.dataset.step;
     const action = row.querySelector('.action-select').value;
     const reason = row.querySelector('.reason-input').value;
     if (!action || action === 'skip') return;
     if (action === 'decline' && !reason.trim()) {
       showToast('Please provide a reason for all rejections.'); throw new Error('missing reason');
     }
-    actions.push({ recordId: id, recordType: type, step, action, comment: reason });
+    actions.push({ recordId: id, recordType: type, action, comment: reason });
   });
 
   if (!actions.length) { showToast('No actions selected.'); return; }

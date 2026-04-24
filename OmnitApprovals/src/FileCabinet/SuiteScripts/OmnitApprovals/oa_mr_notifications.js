@@ -5,7 +5,6 @@
  */
 define([
   'N/email',
-  'N/record',
   'N/render',
   'N/runtime',
   'N/search',
@@ -14,23 +13,22 @@ define([
   './lib/oa_utils',
   './lib/oa_email_template',
   './oa_engine'
-], (email, record, render, runtime, search, url, C, utils, tpl, engine) => {
+], (email, render, runtime, search, url, C, utils, tpl, engine) => {
   'use strict';
 
   const PARAM_RECORD_ID   = 'custscript_oa_mr_record_id';
   const PARAM_RECORD_TYPE = 'custscript_oa_mr_record_type';
-  const PARAM_RAW_TOKEN   = 'custscript_oa_mr_raw_token';
 
   function getInputData(inputContext) {
     const script     = runtime.getCurrentScript();
     const recordId   = script.getParameter({ name: PARAM_RECORD_ID });
     const recordType = script.getParameter({ name: PARAM_RECORD_TYPE });
-    const rawToken   = script.getParameter({ name: PARAM_RAW_TOKEN }) || '';
 
     if (recordId && recordType) {
-      return [{ recordId, recordType, rawToken }];
+      return [{ recordId, recordType }];
     }
 
+    // Scheduled sweep — find all pending transactions that have a nextapprover assigned
     const results = [];
     search.create({
       type:    'transaction',
@@ -39,11 +37,14 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        [C.FIELDS.TRANSACTION.APPROVER1, 'isnotempty', null]
+        ['nextapprover', 'isnotempty', null]
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
-      results.push({ recordId: r.id, recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill', rawToken: '' });
+      results.push({
+        recordId:   r.id,
+        recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill'
+      });
       return true;
     });
     return results;
@@ -58,59 +59,26 @@ define([
     const item       = JSON.parse(reduceContext.values[0]);
     const recordId   = item.recordId;
     const recordType = item.recordType;
-    let   rawToken   = item.rawToken || '';
 
     try {
-      // Scheduled sweep passes no token — generate and persist a fresh one per record
-      if (!rawToken) {
-        rawToken = utils.generateToken();
-        try {
-          const txnRec = record.load({ type: recordType, id: recordId, isDynamic: false });
-          txnRec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVAL_TOKEN, value: utils.hashToken(rawToken) });
-          txnRec.setValue({ fieldId: C.FIELDS.TRANSACTION.TOKEN_CREATED,  value: new Date() });
-          txnRec.save({ ignoreMandatoryFields: true });
-        } catch (te) {
-          log.error('OA MR: token refresh failed', `Record ${recordId}: ${te.message}`);
-          return;
-        }
-      }
-
       const fields = search.lookupFields({
         type:    recordType,
         id:      recordId,
         columns: [
-          C.FIELDS.TRANSACTION.APPROVER1,
-          C.FIELDS.TRANSACTION.APPROVER2,
-          C.FIELDS.TRANSACTION.CURRENT_STEP,
-          C.FIELDS.TRANSACTION.APPROVAL_TOKEN,
-          C.FIELDS.TRANSACTION.SUBMITTED_BY,
+          'nextapprover',
+          'approvalstatus',
           'tranid',
           'subsidiary',
           'amount',
-          'currencysymbol',
-          'approvalstatus'
+          'currencysymbol'
         ]
       });
 
-      if (fields['approvalstatus'] !== C.APPROVAL_STATUS.PENDING) return;
+      if (fields.approvalstatus !== C.APPROVAL_STATUS.PENDING) return;
 
-      const step = parseInt(fields[C.FIELDS.TRANSACTION.CURRENT_STEP], 10) || 1;
-
-      // SELECT fields from lookupFields return arrays — extract the scalar value
-      const approverRaw = step === 1
-        ? fields[C.FIELDS.TRANSACTION.APPROVER1]
-        : fields[C.FIELDS.TRANSACTION.APPROVER2];
-      const approverId = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : null;
-
-      const submittedByRaw = fields[C.FIELDS.TRANSACTION.SUBMITTED_BY];
-      const submittedById  = Array.isArray(submittedByRaw) && submittedByRaw[0] ? submittedByRaw[0].value : null;
-
-      const subsidiaryId   = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].value : null;
-      const subsidiaryName = fields['subsidiary'] && fields['subsidiary'][0] ? fields['subsidiary'][0].text  : '';
-      const documentNumber = fields['tranid'];
-      const amount         = parseFloat(fields['amount']) || 0;
-      const currencySymbol = fields['currencysymbol'] || '';
-
+      // nextapprover is a SELECT field — extract the scalar value
+      const approverRaw = fields.nextapprover;
+      const approverId  = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : null;
       if (!approverId) return;
 
       const useEmail = utils.lookupEmployeeField(approverId, C.FIELDS.EMPLOYEE.USE_EMAIL);
@@ -121,20 +89,49 @@ define([
       const approverEmail  = approverLookup.email;
       if (!approverEmail) return;
 
-      const requesterLookup = submittedById
-        ? search.lookupFields({ type: 'employee', id: submittedById, columns: ['firstname', 'lastname'] })
-        : {};
-      const requesterName = `${requesterLookup.firstname || ''} ${requesterLookup.lastname || ''}`.trim() || 'System';
+      const subsidiaryId   = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].value : null;
+      const subsidiaryName = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].text  : '';
+      const documentNumber = fields.tranid;
+      const amount         = parseFloat(fields.amount) || 0;
+      const currencySymbol = fields.currencysymbol || '';
+
+      // Determine current step from audit log (0 approved → step 1)
+      let approvedCount = 0;
+      search.create({
+        type:    C.RECORDS.LOG,
+        filters: [
+          [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+          'AND',
+          [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.APPROVED]]
+        ],
+        columns: ['internalid']
+      }).run().each(() => { approvedCount++; return true; });
+      const step = approvedCount + 1;
+
+      // Get submitted-by name from SUBMITTED log entry
+      let requesterName = 'System';
+      search.create({
+        type:    C.RECORDS.LOG,
+        filters: [
+          [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+          'AND',
+          [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.SUBMITTED]]
+        ],
+        columns: [C.FIELDS.LOG.ACTOR]
+      }).run().each(r => {
+        requesterName = r.getText(C.FIELDS.LOG.ACTOR) || 'System';
+        return false;
+      });
 
       const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
       const approveLabel = (settings && settings.approve_string) || 'Approve';
       const declineLabel = (settings && settings.reject_string)  || 'Reject';
       const supportEmail = (settings && settings.support_email)  || '';
+      const expiryDays   = (settings && settings.token_expiry_days) ? parseInt(settings.token_expiry_days, 10) : 7;
       const emailSubject = ((settings && settings.email_subject) || 'Approval required — {docNumber}')
         .replace('{docNumber}', documentNumber);
       const emailIntro   = (settings && settings.email_intro) || '';
 
-      // Sender: use the configured sender employee if set, otherwise the scheduling user
       const senderEmployeeId = (settings && settings.email_sender) || runtime.getCurrentUser().id;
 
       const slUrl = url.resolveScript({
@@ -143,9 +140,10 @@ define([
         returnExternalUrl: true
       });
 
-      const baseParams = `oa_record_type=${recordType}&oa_record_id=${recordId}&oa_token=${rawToken}`;
-      const approveUrl = `${slUrl}?oa_action=approve&${baseParams}`;
-      const declineUrl = `${slUrl}?oa_action=decline&${baseParams}`;
+      // Stateless HMAC token — no storage needed on the transaction record
+      const hmacToken  = utils.generateHmacToken(recordType, recordId, step, approverId, expiryDays);
+      const approveUrl = `${slUrl}?oa_action=approve&oa_token=${encodeURIComponent(hmacToken)}`;
+      const declineUrl = `${slUrl}?oa_action=decline&oa_token=${encodeURIComponent(hmacToken)}`;
 
       const htmlBody = tpl.buildApprovalEmail({
         approverName,
@@ -180,7 +178,7 @@ define([
       if (pdfFile) emailParams.attachments = [pdfFile];
 
       email.send(emailParams);
-      log.audit('OA MR: Email sent', `Approver: ${approverEmail} | Record: ${recordType} ${recordId}`);
+      log.audit('OA MR: Email sent', `Approver: ${approverEmail} | Record: ${recordType} ${recordId} | Step: ${step}`);
 
     } catch (e) {
       log.error('OA MR reduce error', `Record ${recordId}: ${e.message}`);

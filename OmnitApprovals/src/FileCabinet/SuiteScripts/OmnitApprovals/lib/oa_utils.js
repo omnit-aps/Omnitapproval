@@ -2,27 +2,71 @@
  * @NApiVersion 2.1
  * @NModuleScope Public
  */
-define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
+define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, search, encode) => {
   'use strict';
 
-  function generateToken() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-      const r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  // Shared secret for stateless HMAC tokens — change per deployment
+  const HMAC_SECRET = 'OA-OMNIT-2025-STATIC-SECRET-v1';
+
+  // ─── HMAC token helpers ───────────────────────────────────────────────────────
+
+  function _b64urlEncode(str) {
+    return encode.convert({
+      string:          str,
+      inputEncoding:   encode.Encoding.UTF_8,
+      outputEncoding:  encode.Encoding.BASE_64
+    }).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function _b64urlDecode(b64url) {
+    const padded = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    return encode.convert({
+      string:         padded,
+      inputEncoding:  encode.Encoding.BASE_64,
+      outputEncoding: encode.Encoding.UTF_8
     });
   }
 
-  function hashToken(token) {
-    const hasher = crypto.createHash({ algorithm: crypto.HashAlg.SHA256 });
-    hasher.update({ input: token });
-    return hasher.digest({ outputEncoding: crypto.Encoding.HEX });
+  function _sign(data) {
+    const h = crypto.createHash({ algorithm: crypto.HashAlg.SHA256 });
+    h.update({ input: HMAC_SECRET + '|' + data });
+    return h.digest({ outputEncoding: crypto.Encoding.HEX });
   }
 
-  function isTokenExpired(tokenCreated, expiryDays) {
-    if (!tokenCreated) return true;
-    const expiry = new Date(new Date(tokenCreated).getTime() + (expiryDays || 7) * 86400000);
-    return new Date() > expiry;
+  /**
+   * Generate a stateless HMAC token. No storage needed.
+   * Format: base64url(payload) + "." + sha256(SECRET|base64url(payload))
+   */
+  function generateHmacToken(recordType, recordId, step, approverId, expiryDays) {
+    const exp  = Date.now() + (expiryDays || 7) * 86400000;
+    const body = _b64urlEncode(JSON.stringify({
+      rt:  recordType,
+      rid: String(recordId),
+      s:   step,
+      aid: String(approverId),
+      exp
+    }));
+    return body + '.' + _sign(body);
   }
+
+  /**
+   * Verify a token and return its payload, or null if invalid/expired.
+   */
+  function verifyHmacToken(token) {
+    if (!token) return null;
+    const dot = token.lastIndexOf('.');
+    if (dot < 0) return null;
+    const body = token.slice(0, dot);
+    const sig  = token.slice(dot + 1);
+    if (_sign(body) !== sig) return null;
+    try {
+      const p = JSON.parse(_b64urlDecode(body));
+      if (Date.now() > p.exp) return null;
+      return p;
+    } catch (e) { return null; }
+  }
+
+  // ─── General helpers ──────────────────────────────────────────────────────────
 
   function getCurrentUserId() {
     return runtime.getCurrentUser().id;
@@ -34,8 +78,6 @@ define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
   }
 
   function getTransactionAmount(recordType, recordId) {
-    // 'amount' in a transaction search is the base currency total.
-    // 'fxamount' is the transaction (foreign) currency total — not what we want.
     const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount'] });
     return parseFloat(result.amount) || 0;
   }
@@ -58,9 +100,8 @@ define(['N/crypto', 'N/runtime', 'N/search'], (crypto, runtime, search) => {
   }
 
   return {
-    generateToken,
-    hashToken,
-    isTokenExpired,
+    generateHmacToken,
+    verifyHmacToken,
     getCurrentUserId,
     getTransactionSubsidiary,
     getTransactionAmount,

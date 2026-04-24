@@ -35,19 +35,14 @@ define([
     search.create({
       type:    'transaction',
       filters: [
-        ['type',            'anyof', ['PurchOrd', 'VendBill']],
+        ['type',           'anyof', ['PurchOrd', 'VendBill']],
         'AND',
-        ['approvalstatus',  'anyof', [C.APPROVAL_STATUS.PENDING]],
+        ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        [
-          [C.FIELDS.TRANSACTION.APPROVER1, 'anyof', [userId]],
-          'OR',
-          [C.FIELDS.TRANSACTION.APPROVER2, 'anyof', [userId]]
-        ]
+        ['nextapprover',   'anyof', [userId]]
       ],
       columns: [
-        'internalid', 'type', 'tranid', 'entity', 'amount', 'currency',
-        C.FIELDS.TRANSACTION.CURRENT_STEP
+        'internalid', 'type', 'tranid', 'entity', 'amount', 'currency'
       ]
     }).run().getRange({ start: 0, end: 10 }).forEach(r => {
       results.push({

@@ -67,13 +67,9 @@ define([], () => {
         USE_EMAIL:    'custentity_oa_use_email',
         DELEGATE_TO:  'custentity_oa_delegate_to'
       },
+      // custbody fields — may not exist on all record types; all writes wrapped in try/catch
       TRANSACTION: {
-        CURRENT_STEP:   'custbody_oa_current_step',
-        APPROVER1:      'custbody_oa_approver1',
-        APPROVER2:      'custbody_oa_approver2',
         SUBMITTED_BY:   'custbody_oa_submitted_by',
-        APPROVAL_TOKEN: 'custbody_oa_approval_token',
-        TOKEN_CREATED:  'custbody_oa_token_created',
         HIERARCHY_USED: 'custbody_oa_hierarchy_used'
       }
     },
