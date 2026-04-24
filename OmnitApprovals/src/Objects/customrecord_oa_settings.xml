@@ -83,7 +83,7 @@
       <label>Email Subject</label>
       <fieldtype>TEXT</fieldtype>
       <ismandatory>F</ismandatory>
-      <defaultvalue>Approval required — {docNumber}</defaultvalue>
+      <defaultvalue>Approval required - {docNumber}</defaultvalue>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_email_intro">
       <label>Email Intro Text</label>
