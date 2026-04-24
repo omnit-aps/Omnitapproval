@@ -54,13 +54,17 @@ define([
         return;
       }
 
-      // Validate: only one settings record per subsidiary
+      // Validate: only one active settings record per subsidiary
       const subsidiaryId = parseInt(p.oa_subsidiary, 10);
       if (subsidiaryId) {
         let dupFound = false;
         search.create({
           type:    C.RECORDS.SETTINGS,
-          filters: [[C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId]],
+          filters: [
+            [C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId],
+            'AND',
+            ['isinactive', 'is', 'F']
+          ],
           columns: ['internalid']
         }).run().each(r => {
           if (String(r.id) !== String(settingsId)) { dupFound = true; }
@@ -98,6 +102,27 @@ define([
       const savedId = rec.save();
 
       saveMatrixRows(savedId, p);
+
+      // Deactivate any duplicate active settings for the same subsidiary (keep only savedId)
+      if (subsidiaryId) {
+        search.create({
+          type:    C.RECORDS.SETTINGS,
+          filters: [
+            [C.FIELDS.SETTINGS.SUBSIDIARY, 'anyof', subsidiaryId],
+            'AND',
+            ['isinactive', 'is', 'F']
+          ],
+          columns: ['internalid']
+        }).run().each(r => {
+          if (String(r.id) !== String(savedId)) {
+            try {
+              record.submitFields({ type: C.RECORDS.SETTINGS, id: r.id, values: { isinactive: true }, ignoreMandatoryFields: true });
+            } catch (de) { log.error('OA: dedup deactivate failed', `id=${r.id}: ${de.message}`); }
+          }
+          return true;
+        });
+      }
+
       resp.write(`<script>window.location='${selfUrl}&oa_view=edit&oa_settings_id=${savedId}&oa_saved=1'</script>`);
     } catch (e) {
       resp.write(renderError(e.message, selfUrl));
