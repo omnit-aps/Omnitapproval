@@ -317,6 +317,19 @@ define([
       return true;
     });
     const empOptsHtml = empOpts.join('');
+
+    // Pre-build approver-only options HTML for matrix row dropdowns (filtered by is_approver=T)
+    const apprOpts = ['<option value="">— Select approver —</option>'];
+    search.create({
+      type:    'employee',
+      filters: [['isinactive', 'is', 'F'], 'AND', [C.FIELDS.EMPLOYEE.IS_APPROVER, 'is', 'T']],
+      columns: ['internalid', 'entityid']
+    }).run().each(r => {
+      apprOpts.push(`<option value="${r.id}">${r.getValue('entityid').replace(/"/g, '&quot;')}</option>`);
+      return true;
+    });
+    const apprOptsHtml = apprOpts.join('');
+
     const useAmount   = !!s.use_amount;
     const enablePo    = !!s.enable_po;
     const enableVb    = !!s.enable_vb;
@@ -457,7 +470,8 @@ define([
       ${renderHistorySection('Vendor Bills',    vbHistory, useAmount, baseCurrency)}
 
       <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" data-currency="${baseCurrency}" style="display:none"></div>
-      <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>`, selfUrl, jsUrl);
+      <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>
+      <select id="approver-options-template" style="display:none" aria-hidden="true">${apprOptsHtml}</select>`, selfUrl, jsUrl);
   }
 
   // ─── Employee dropdown helper ─────────────────────────────────────────────────
@@ -467,6 +481,26 @@ define([
     search.create({
       type:    'employee',
       filters: [['isinactive', 'is', 'F']],
+      columns: ['internalid', 'entityid']
+    }).run().each(r => {
+      const sel = String(r.id) === String(selectedId) ? ' selected' : '';
+      opts.push(`<option value="${r.id}"${sel}>${r.getValue('entityid')}</option>`);
+      return true;
+    });
+    return `<select name="${fieldName}">${opts.join('')}</select>`;
+  }
+
+  // ─── Approver dropdown (matrix rows) — filtered to is_approver=T employees ────
+
+  function approverSelect(fieldName, selectedId) {
+    const opts = ['<option value="">— Select approver —</option>'];
+    search.create({
+      type:    'employee',
+      filters: [
+        ['isinactive', 'is', 'F'],
+        'AND',
+        [C.FIELDS.EMPLOYEE.IS_APPROVER, 'is', 'T']
+      ],
       columns: ['internalid', 'entityid']
     }).run().each(r => {
       const sel = String(r.id) === String(selectedId) ? ' selected' : '';
@@ -517,11 +551,11 @@ define([
       const upDis   = i === 0         ? ' disabled' : '';
       const downDis = i === total - 1 ? ' disabled' : '';
       return `<tr data-row="${i}">
-          <td class="prio-col"><button type="button" class="btn-prio" onclick="moveRowUp(this,'${prefix}')"${upDis}>▲</button><button type="button" class="btn-prio" onclick="moveRowDown(this,'${prefix}')"${downDis}>▼</button></td>
+          <td class="prio-col"><button type="button" class="btn-prio" onclick="OA_moveRow('${prefix}',${i},-1)"${upDis}>▲</button><button type="button" class="btn-prio" onclick="OA_moveRow('${prefix}',${i},1)"${downDis}>▼</button></td>
           <td class="amount-col"${colStyle}><span class="amount-wrap"><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num">${curTag}</span></td>
-          <td>${employeeSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
-          <td>${employeeSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
-          <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="deleteRow(this,'${prefix}')">Delete</button></td>
+          <td>${approverSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
+          <td>${approverSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
+          <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="OA_deleteRow(this,'${prefix}')">Delete</button></td>
         </tr>`;
     }).join('');
     return `<div class="matrix-wrapper" data-type="${prefix}"${isEnabled ? '' : ' style="display:none"'}>
@@ -783,6 +817,51 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
 </div>
 <div class="main">${body}</div>
 <script>
+// ─── Row reorder (inline — works even if external client JS fails to load) ───
+function OA_reindex(p) {
+  var rows = document.querySelectorAll('#' + p + '-matrix-body tr');
+  rows.forEach(function(tr, i) {
+    tr.setAttribute('data-row', i);
+    tr.querySelectorAll('input[name],select[name]').forEach(function(el) {
+      el.name = el.name.replace(new RegExp('^' + p + '_row_\\\\d+_'), p + '_row_' + i + '_');
+    });
+    var btns = tr.querySelectorAll('.btn-prio');
+    if (btns[0]) { btns[0].disabled = i === 0;              btns[0].setAttribute('onclick', "OA_moveRow('" + p + "'," + i + ",-1)"); }
+    if (btns[1]) { btns[1].disabled = i === rows.length - 1; btns[1].setAttribute('onclick', "OA_moveRow('" + p + "'," + i + ",1)"); }
+  });
+  var cnt = document.getElementById(p + '_row_count');
+  if (cnt) cnt.value = rows.length;
+}
+function OA_moveRow(p, idx, delta) {
+  var tbody = document.getElementById(p + '-matrix-body');
+  var rows  = Array.from(tbody.querySelectorAll('tr'));
+  var nIdx  = idx + delta;
+  if (nIdx < 0 || nIdx >= rows.length) return;
+  if (delta > 0) { rows[nIdx].insertAdjacentElement('afterend', rows[idx]); }
+  else           { tbody.insertBefore(rows[idx], rows[nIdx]); }
+  OA_reindex(p);
+}
+function OA_deleteRow(btn, p) { btn.closest('tr').remove(); OA_reindex(p); }
+// Aliases so external client JS still works if cached
+window.moveRowUp   = function(btn, p) { var tr = btn.closest('tr'); var prev = tr.previousElementSibling; if (prev) tr.parentNode.insertBefore(tr, prev); OA_reindex(p); };
+window.moveRowDown = function(btn, p) { var tr = btn.closest('tr'); var next = tr.nextElementSibling;     if (next) tr.parentNode.insertBefore(next, tr); OA_reindex(p); };
+window.deleteRow   = OA_deleteRow;
+// Patch addRow to use approver template for row dropdowns
+var _origAddRow = window.addRow;
+window.addRow = function(p) {
+  if (_origAddRow) _origAddRow(p);
+  // Replace the last-added row's approver dropdowns with approver-only options
+  var tbody = document.getElementById(p + '-matrix-body');
+  if (!tbody) return;
+  var lastRow = tbody.querySelector('tr:last-child');
+  if (!lastRow) return;
+  var apprTmpl = document.getElementById('approver-options-template');
+  if (!apprTmpl) return;
+  lastRow.querySelectorAll('select[name$="_approver1"],select[name$="_approver2"]').forEach(function(sel) {
+    sel.innerHTML = apprTmpl.innerHTML;
+  });
+};
+
 function OA_updateCurrency(sel) {
   var opt = sel.options[sel.selectedIndex];
   var cur = opt ? (opt.getAttribute('data-currency') || '') : '';
