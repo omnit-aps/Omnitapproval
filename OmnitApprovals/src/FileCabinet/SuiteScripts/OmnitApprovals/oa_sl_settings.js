@@ -483,16 +483,27 @@ define([
     try {
       search.create({
         type:    'subsidiary',
-        columns: ['internalid', 'name']
+        columns: ['internalid', 'name', 'currency']
       }).run().each(r => {
-        const sel = String(r.id) === String(selectedId) ? ' selected' : '';
-        opts.push(`<option value="${r.id}"${sel}>${r.getValue('name')}</option>`);
+        const curId = r.getValue('currency');
+        let isoCode = '';
+        if (curId) {
+          try {
+            const cf = search.lookupFields({ type: 'currency', id: curId, columns: ['isocode', 'symbol', 'name'] });
+            isoCode = cf.isocode || cf.symbol || cf.name || r.getText('currency') || '';
+          } catch (ce) {
+            isoCode = r.getText('currency') || '';
+          }
+        }
+        const sel     = String(r.id) === String(selectedId) ? ' selected' : '';
+        const curAttr = isoCode.replace(/"/g, '&quot;');
+        opts.push(`<option value="${r.id}"${sel} data-currency="${curAttr}">${r.getValue('name')}</option>`);
         return true;
       });
     } catch (e) {
       if (selectedId) opts.push(`<option value="${selectedId}" selected>${selectedId}</option>`);
     }
-    return `<select name="${fieldName}" required>${opts.join('')}</select>`;
+    return `<select name="${fieldName}" id="oa-subsidiary-select" required onchange="OA_updateCurrency(this)">${opts.join('')}</select>`;
   }
 
   // ─── Matrix HTML helper ───────────────────────────────────────────────────────
@@ -528,7 +539,7 @@ define([
           <table class="data-table">
             <thead><tr>
               <th class="prio-col" style="width:72px">Priority</th>
-              <th class="amount-col"${colStyle} style="width:180px">${amountHdr}</th>
+              <th class="amount-col matrix-amount-hdr"${colStyle} style="width:180px">${amountHdr}</th>
               <th>Approver 1</th>
               <th>Approver 2 <span style="font-weight:normal;color:#aaa">(optional)</span></th>
               <th style="width:60px"></th>
@@ -771,6 +782,27 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   ${breadcrumb}
 </div>
 <div class="main">${body}</div>
+<script>
+function OA_updateCurrency(sel) {
+  var opt = sel.options[sel.selectedIndex];
+  var cur = opt ? (opt.getAttribute('data-currency') || '') : '';
+  // Update all currency badge spans in the matrix
+  document.querySelectorAll('.currency-tag').forEach(function(el) {
+    el.textContent = cur;
+    el.style.display = cur ? '' : 'none';
+  });
+  // Update amount column headers
+  document.querySelectorAll('.matrix-amount-hdr').forEach(function(el) {
+    el.textContent = 'Amount from' + (cur ? ' (' + cur + ')' : '');
+  });
+  // Keep oa_subsidiary_name hidden field in sync
+  var nm = document.getElementById('oa_subsidiary_name');
+  if (nm && opt) nm.value = opt.text || '';
+  // Update data-currency attribute for client-side new rows
+  var d = document.getElementById('oa-data');
+  if (d) d.setAttribute('data-currency', cur);
+}
+</script>
 </body></html>`;
   }
 
