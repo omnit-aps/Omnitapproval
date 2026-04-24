@@ -246,7 +246,7 @@ define([
             'AND',
             [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',      recordType],
             'AND',
-            [C.FIELDS.HIERARCHY.STATUS,      'isnot',   C.HIERARCHY_STATUS.ACTIVE]
+            [C.FIELDS.HIERARCHY.STATUS,      'noneof',  [C.HIERARCHY_STATUS.ACTIVE]]
           ],
           columns: [
             'internalid',
