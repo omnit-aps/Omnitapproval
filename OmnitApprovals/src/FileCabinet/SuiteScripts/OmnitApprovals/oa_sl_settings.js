@@ -233,63 +233,42 @@ define([
       }
     }
 
-    // Load expired/draft hierarchies for the history section (read-only)
-    let poHistory = [];
-    let vbHistory = [];
+    // Load expired/draft hierarchies for the Matrix history section (single list, all types)
+    let historyItems = [];
     if (settingsId !== 'new') {
-      const loadHistoryForType = (recordType) => {
-        const result = [];
+      try {
         search.create({
           type:    C.RECORDS.HIERARCHY,
           filters: [
-            [C.FIELDS.HIERARCHY.SETTINGS,    'equalto', settingsId],
+            [C.FIELDS.HIERARCHY.SETTINGS, 'equalto', settingsId],
             'AND',
-            [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is',      recordType],
-            'AND',
-            [C.FIELDS.HIERARCHY.STATUS,      'noneof',  [C.HIERARCHY_STATUS.ACTIVE]]
+            [C.FIELDS.HIERARCHY.STATUS, 'anyof', [C.HIERARCHY_STATUS.DRAFT, C.HIERARCHY_STATUS.EXPIRED]]
           ],
           columns: [
             'internalid',
             C.FIELDS.HIERARCHY.NAME,
             C.FIELDS.HIERARCHY.STATUS,
+            C.FIELDS.HIERARCHY.RECORD_TYPE,
             C.FIELDS.HIERARCHY.START_DATE,
             C.FIELDS.HIERARCHY.END_DATE
           ]
         }).run().each(hr => {
           const statusVal = hr.getValue(C.FIELDS.HIERARCHY.STATUS);
-          const rows = [];
-          search.create({
-            type:    C.RECORDS.THRESHOLD,
-            filters: [[C.FIELDS.THRESHOLD.HIERARCHY, 'equalto', hr.id]],
-            columns: ['internalid', C.FIELDS.THRESHOLD.SORT_ORDER]
-          }).run().each(t => {
-            rows.push({ id: parseInt(t.id, 10), sortOrder: parseInt(t.getValue(C.FIELDS.THRESHOLD.SORT_ORDER), 10) || 0 });
-            return true;
-          });
-          rows.sort((a, b) => a.sortOrder - b.sortOrder);
-          const thresholds = rows.map(({ id }) => {
-            try {
-              const t = record.load({ type: C.RECORDS.THRESHOLD, id, isDynamic: false });
-              return {
-                minAmount: t.getValue(C.FIELDS.THRESHOLD.MIN_AMOUNT) || 0,
-                approver1: t.getText(C.FIELDS.THRESHOLD.APPROVER)  || '—',
-                approver2: t.getText(C.FIELDS.THRESHOLD.APPROVER2) || ''
-              };
-            } catch (e) { return null; }
-          }).filter(Boolean);
-          result.push({
+          const rtVal     = hr.getValue(C.FIELDS.HIERARCHY.RECORD_TYPE);
+          let rtLabel = '—';
+          if      (rtVal === C.HIERARCHY_RECORD_TYPES.PO)   rtLabel = 'PO';
+          else if (rtVal === C.HIERARCHY_RECORD_TYPES.VB)   rtLabel = 'VB';
+          else if (rtVal === C.HIERARCHY_RECORD_TYPES.BOTH) rtLabel = 'PO + VB';
+          historyItems.push({
             name:      hr.getValue(C.FIELDS.HIERARCHY.NAME) || `Hierarchy ${hr.id}`,
             status:    statusVal === C.HIERARCHY_STATUS.DRAFT ? 'Draft' : 'Expired',
+            recordType: rtLabel,
             startDate: hr.getValue(C.FIELDS.HIERARCHY.START_DATE) || '',
-            endDate:   hr.getValue(C.FIELDS.HIERARCHY.END_DATE)   || '',
-            thresholds
+            endDate:   hr.getValue(C.FIELDS.HIERARCHY.END_DATE)   || ''
           });
           return true;
         });
-        return result;
-      };
-      try { poHistory = loadHistoryForType(C.HIERARCHY_RECORD_TYPES.PO); } catch (e) {}
-      try { vbHistory = loadHistoryForType(C.HIERARCHY_RECORD_TYPES.VB); } catch (e) {}
+      } catch (e) { log.error('OA: matrix history load failed', e.message); }
     }
 
     // Look up the subsidiary's base currency symbol for display in the matrix
@@ -466,8 +445,7 @@ define([
         ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo, baseCurrency)}
       </form>
 
-      ${renderHistorySection('Purchase Orders', poHistory, useAmount, baseCurrency)}
-      ${renderHistorySection('Vendor Bills',    vbHistory, useAmount, baseCurrency)}
+      ${renderMatrixHistory(historyItems)}
 
       <div id="oa-data" data-po-count="${poRows.length}" data-vb-count="${vbRows.length}" data-use-amount="${useAmount}" data-currency="${baseCurrency}" style="display:none"></div>
       <select id="emp-options-template" style="display:none" aria-hidden="true">${empOptsHtml}</select>
@@ -626,6 +604,41 @@ define([
       <h2 style="margin-bottom:4px">Matrix history — ${typeLabel}</h2>
       <p class="muted" style="margin-bottom:20px;font-size:12px">Past approval matrices that are no longer active. Read-only reference.</p>
       ${items}
+    </div>`;
+  }
+
+  // ─── Matrix history (single unified section, all record types) ───────────────
+
+  function renderMatrixHistory(items) {
+    if (!items || items.length === 0) return '';
+    const fmtDate = (d) => d ? String(d) : '—';
+    const pill = (status) => {
+      const color = status === 'Draft' ? '#d97706' : '#c74634';
+      return `<span style="display:inline-block;padding:3px 10px;background:${color}18;color:${color};border:1px solid ${color}30;border-radius:20px;font-size:12px;font-weight:600">${status}</span>`;
+    };
+    const rows = items.map(h => `
+      <tr>
+        <td style="padding:10px 12px;border-bottom:1px solid #f5f5f5;font-weight:500">${h.name}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #f5f5f5">${h.recordType}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #f5f5f5">${pill(h.status)}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #f5f5f5;color:#666">${fmtDate(h.startDate)}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #f5f5f5;color:#666">${fmtDate(h.endDate)}</td>
+      </tr>`).join('');
+    return `<div class="card section" style="margin-top:24px">
+      <h2 style="margin-bottom:4px">Matrix history</h2>
+      <p class="muted" style="margin-bottom:20px;font-size:12px">Past approval matrices that are no longer active. Read-only reference.</p>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#fafafa">
+            <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Name</th>
+            <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Type</th>
+            <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Status</th>
+            <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">Start date</th>
+            <th style="text-align:left;padding:9px 12px;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #f0efee">End date</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     </div>`;
   }
 
