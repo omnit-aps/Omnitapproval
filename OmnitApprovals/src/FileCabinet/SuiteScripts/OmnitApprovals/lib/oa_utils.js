@@ -90,6 +90,12 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     return val !== undefined ? val : null;
   }
 
+  // selectValue — extract scalar from search.lookupFields() select-field result (returns [{value,text}]).
+  // Use whenever comparing approvalstatus, nextapprover, or any SELECT field from lookupFields.
+  function selectValue(v) {
+    return Array.isArray(v) && v[0] ? String(v[0].value) : String(v || '');
+  }
+
   function today() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -106,6 +112,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     getTransactionSubsidiary,
     getTransactionAmount,
     lookupEmployeeField,
+    selectValue,
     today,
     formatCurrency
   };

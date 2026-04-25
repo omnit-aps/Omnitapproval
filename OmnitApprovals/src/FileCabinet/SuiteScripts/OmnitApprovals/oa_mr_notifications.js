@@ -74,7 +74,7 @@ define([
         ]
       });
 
-      if (fields.approvalstatus !== C.APPROVAL_STATUS.PENDING) return;
+      if (utils.selectValue(fields.approvalstatus) !== C.APPROVAL_STATUS.PENDING) return;
 
       // nextapprover is a SELECT field — extract the scalar value
       const approverRaw = fields.nextapprover;
@@ -123,16 +123,18 @@ define([
         return false;
       });
 
-      const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
-      const approveLabel = (settings && settings.approve_string) || 'Approve';
-      const declineLabel = (settings && settings.reject_string)  || 'Reject';
-      const supportEmail = (settings && settings.support_email)  || '';
-      const expiryDays   = (settings && settings.token_expiry_days) ? parseInt(settings.token_expiry_days, 10) : 7;
-      const emailSubject = ((settings && settings.email_subject) || 'Approval required — {docNumber}')
-        .replace('{docNumber}', documentNumber);
-      const emailIntro   = (settings && settings.email_intro) || '';
+      const settings = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
+      if (!settings || !settings.email_enabled) return;
 
-      const senderEmployeeId = (settings && settings.email_sender) || runtime.getCurrentUser().id;
+      const approveLabel = settings.approve_string || 'Approve';
+      const declineLabel = settings.reject_string  || 'Reject';
+      const supportEmail = settings.support_email  || '';
+      const expiryDays   = settings.token_expiry_days ? parseInt(settings.token_expiry_days, 10) : 7;
+      const emailSubject = (settings.email_subject || 'Approval required — {docNumber}')
+        .replace('{docNumber}', documentNumber);
+      const emailIntro   = settings.email_intro || '';
+
+      const senderEmployeeId = settings.email_sender || runtime.getCurrentUser().id;
 
       const slUrl = url.resolveScript({
         scriptId:          'customscript_oa_sl_email_action',

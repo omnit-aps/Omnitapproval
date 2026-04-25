@@ -113,6 +113,11 @@ define([
 
     const { approver1, hierarchyId } = result;
 
+    if (!approver1) {
+      log.error('OA-UE: no approver resolved — aborting, record left in its current status', { recordId, recordType });
+      return;
+    }
+
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });

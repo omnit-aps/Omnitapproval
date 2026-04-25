@@ -67,7 +67,7 @@ define([
       return;
     }
 
-    if (fields.approvalstatus !== C.APPROVAL_STATUS.PENDING) {
+    if (utils.selectValue(fields.approvalstatus) !== C.APPROVAL_STATUS.PENDING) {
       resp.write(_errorPage('This transaction has already been processed.'));
       return;
     }
