@@ -73,6 +73,7 @@ define([
     });
 
     if (!hierarchies.length) return null;
+    hierarchies.sort((a, b) => a.id - b.id);
     const h = hierarchies[0];
 
     const thresholds = [];
@@ -288,6 +289,14 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
+    const currentApprover = txn.getValue('nextapprover');
+    if (!currentApprover || String(currentApprover) !== String(actorId)) {
+      return { success: false, message: 'You are not the assigned approver for this step.' };
+    }
+    if (txn.getValue('approvalstatus') !== C.APPROVAL_STATUS.PENDING) {
+      return { success: false, message: 'Transaction is not pending approval.' };
+    }
+
     const step = _countApprovedLogs(recordId) + 1;
     _setNextApprover(txn, targetId);
     try {
@@ -305,8 +314,10 @@ define([
   // ─── Process Reset (Manager) ─────────────────────────────────────────────────
 
   function processReset(recordId, recordType, managerId, newApproverId) {
-    const isManager = utils.lookupEmployeeField(managerId, C.FIELDS.EMPLOYEE.IS_MANAGER);
-    if (!isManager) return { success: false, message: 'Actor is not a manager.' };
+    const isManager       = utils.lookupEmployeeField(managerId,    C.FIELDS.EMPLOYEE.IS_MANAGER);
+    const targetIsApprover = utils.lookupEmployeeField(newApproverId, C.FIELDS.EMPLOYEE.IS_APPROVER);
+    if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
+    if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
     let txn;
     try {
@@ -333,8 +344,10 @@ define([
   // Like reset but keeps current approval status + step — only swaps the approver.
 
   function processReassign(recordId, recordType, managerId, newApproverId) {
-    const isManager = utils.lookupEmployeeField(managerId, C.FIELDS.EMPLOYEE.IS_MANAGER);
-    if (!isManager) return { success: false, message: 'Actor is not a manager.' };
+    const isManager        = utils.lookupEmployeeField(managerId,    C.FIELDS.EMPLOYEE.IS_MANAGER);
+    const targetIsApprover = utils.lookupEmployeeField(newApproverId, C.FIELDS.EMPLOYEE.IS_APPROVER);
+    if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
+    if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
     let txn;
     try {

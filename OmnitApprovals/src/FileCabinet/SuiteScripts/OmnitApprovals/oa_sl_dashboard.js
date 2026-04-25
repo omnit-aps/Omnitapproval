@@ -29,7 +29,7 @@ define([
     const statusFilter = req.parameters.oa_filter_status || 'pending';
 
     const rows = loadPendingTransactions(userId, typeFilter, statusFilter);
-    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter));
+    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId));
   }
 
   // ─── Batch POST ───────────────────────────────────────────────────────────────
@@ -46,6 +46,12 @@ define([
           result = engine.processApproval(a.recordId, a.recordType, userId);
         } else if (a.action === 'decline') {
           result = engine.processDecline(a.recordId, a.recordType, userId, a.comment || 'Rejected via dashboard');
+        } else if (a.action === 'reassign') {
+          if (!a.newApprover) {
+            result = { success: false, message: 'New approver ID required for reassign.' };
+          } else {
+            result = engine.processReassign(a.recordId, a.recordType, userId, a.newApprover);
+          }
         } else {
           result = { success: false, message: 'Unknown action' };
         }
@@ -62,7 +68,10 @@ define([
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
   function loadPendingTransactions(userId, typeFilter, statusFilter) {
-    const isManager = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER] })[C.FIELDS.EMPLOYEE.IS_MANAGER];
+    let isManager = false;
+    try {
+      isManager = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER] })[C.FIELDS.EMPLOYEE.IS_MANAGER];
+    } catch (e) { /* user has no employee record — treat as non-manager */ }
 
     const statusMap = { pending: C.APPROVAL_STATUS.PENDING, approved: C.APPROVAL_STATUS.APPROVED, rejected: C.APPROVAL_STATUS.REJECTED };
     const approvalStatuses = statusFilter === 'all' ? Object.values(C.APPROVAL_STATUS) : [statusMap[statusFilter] || C.APPROVAL_STATUS.PENDING];
@@ -107,7 +116,8 @@ define([
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
         statusClass: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'badge-orange'
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
-        nextApprover: r.getText('nextapprover') || '—',
+        nextApprover:   r.getText('nextapprover') || '—',
+        nextApproverId: r.getValue('nextapprover') || '',
         submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY) || '—',
         created:      r.getValue('datecreated')
       });
@@ -119,24 +129,34 @@ define([
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
-  function renderDashboard(rows, selfUrl, typeFilter, statusFilter) {
+  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId) {
     const totalApproved = rows.filter(r => r.status === C.APPROVAL_STATUS.APPROVED).reduce((s, r) => s + r.amount, 0);
     const totalRejected = rows.filter(r => r.status === C.APPROVAL_STATUS.REJECTED).reduce((s, r) => s + r.amount, 0);
     const totalPending  = rows.filter(r => r.status === C.APPROVAL_STATUS.PENDING).length;
     const totalAll      = rows.length;
     const progress      = totalAll > 0 ? Math.round(((totalAll - totalPending) / totalAll) * 100) : 0;
 
-    const tableRows = rows.map(r => `
+    const tableRows = rows.map(r => {
+      const isAssigned = String(r.nextApproverId) === String(userId);
+      const actionOptions = isAssigned
+        ? `<option value="">— Select action —</option>
+           <option value="approve">Approve</option>
+           <option value="decline">Reject</option>
+           <option value="skip">Skip</option>`
+        : `<option value="">— Select action —</option>
+           <option value="reassign">Reassign</option>
+           <option value="skip">Skip</option>`;
+      return `
       <tr data-id="${r.id}" data-type="${r.type}">
         <td>
           <select class="action-select" data-id="${r.id}">
-            <option value="">— Select action —</option>
-            <option value="approve">Approve</option>
-            <option value="decline">Reject</option>
-            <option value="skip">Skip</option>
+            ${actionOptions}
           </select>
         </td>
-        <td><input type="text" class="reason-input" data-id="${r.id}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px"></td>
+        <td>${isAssigned
+          ? `<input type="text" class="reason-input" data-id="${r.id}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+          : `<input type="text" class="reassign-input" data-id="${r.id}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+        }</td>
         <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${r.typeLabel}</span></td>
         <td class="fw500">${r.entity || '—'}</td>
         <td class="mono">${r.tranid}</td>
@@ -147,7 +167,8 @@ define([
         <td>${r.nextApprover}</td>
         <td class="muted">${r.created || '—'}</td>
         <td><span class="badge ${r.statusClass}">${r.statusLabel}</span></td>
-      </tr>`).join('') || '<tr><td colspan="12" class="empty">No transactions match the filter.</td></tr>';
+      </tr>`;
+    }).join('') || '<tr><td colspan="12" class="empty">No transactions match the filter.</td></tr>';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -297,17 +318,24 @@ function resetAll() {
 
 async function submitAll() {
   const actions = [];
+  let valid = true;
   document.querySelectorAll('tr[data-id]').forEach(row => {
-    const id     = row.dataset.id;
-    const type   = row.dataset.type;
-    const action = row.querySelector('.action-select').value;
-    const reason = row.querySelector('.reason-input').value;
+    if (!valid) return;
+    const id          = row.dataset.id;
+    const type        = row.dataset.type;
+    const action      = row.querySelector('.action-select').value;
+    const reason      = row.querySelector('.reason-input').value;
+    const newApprover = row.querySelector('.reassign-input') ? row.querySelector('.reassign-input').value.trim() : '';
     if (!action || action === 'skip') return;
     if (action === 'decline' && !reason.trim()) {
-      showToast('Please provide a reason for all rejections.'); throw new Error('missing reason');
+      showToast('Please provide a reason for all rejections.'); valid = false; return;
     }
-    actions.push({ recordId: id, recordType: type, action, comment: reason });
+    if (action === 'reassign' && !newApprover) {
+      showToast('Please enter a new approver ID for all reassignments.'); valid = false; return;
+    }
+    actions.push({ recordId: id, recordType: type, action, comment: reason, newApprover });
   });
+  if (!valid) return;
 
   if (!actions.length) { showToast('No actions selected.'); return; }
 
