@@ -226,6 +226,7 @@ define([
     }
 
     const form   = context.form;
+    form.clientScriptModulePath = './oa_client_script';
     const userId = runtime.getCurrentUser().id;
     const status = rec.getValue('approvalstatus');
 
