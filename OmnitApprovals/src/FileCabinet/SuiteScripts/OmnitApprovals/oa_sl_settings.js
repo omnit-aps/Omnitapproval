@@ -5,18 +5,37 @@
  */
 define([
   'N/record',
+  'N/runtime',
   'N/search',
   'N/url',
   'N/file',
   './lib/oa_constants',
+  './lib/oa_utils',
   './oa_engine'
-], (record, search, url, nsFile, C, engine) => {
+], (record, runtime, search, url, nsFile, C, utils, engine) => {
   'use strict';
 
   function onRequest(context) {
     const req  = context.request;
     const resp = context.response;
     resp.setHeader({ name: 'Content-Type', value: 'text/html; charset=utf-8' });
+
+    // ── Access guard ─────────────────────────────────────────────────────────
+    // Settings drive approval routing — restrict to Administrator OR approval
+    // managers (custentity_oa_is_manager=T). Defence-in-depth on top of the
+    // SDF audience setting; a misconfigured deployment shouldn't leak access.
+    const user      = runtime.getCurrentUser();
+    const isAdmin   = user.roleId === 'administrator' || user.role === 3;
+    const isManager = !!utils.lookupEmployeeField(user.id, C.FIELDS.EMPLOYEE.IS_MANAGER);
+    if (!isAdmin && !isManager) {
+      resp.write('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Access denied</title>'
+        + '<style>body{font-family:-apple-system,sans-serif;background:#f4f4f4;padding:80px 20px}'
+        + '.card{max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:40px;box-shadow:0 2px 12px rgba(0,0,0,.09)}'
+        + 'h2{color:#c74634;margin:0 0 12px}p{color:#555;line-height:1.6}</style></head>'
+        + '<body><div class="card"><h2>Access denied</h2>'
+        + '<p>This page is restricted to administrators and approval managers.</p></div></body></html>');
+      return;
+    }
 
     if (req.method === 'POST') {
       handlePost(req, resp);
@@ -44,6 +63,22 @@ define([
   function handlePost(req, resp) {
     const p       = req.parameters;
     const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
+
+    // ── Deactivate action — clean up duplicate configs from the list view ──
+    if (p.oa_action === 'deactivate' && p.oa_settings_id) {
+      try {
+        record.submitFields({
+          type:                  C.RECORDS.SETTINGS,
+          id:                    parseInt(p.oa_settings_id, 10),
+          values:                { isinactive: true },
+          ignoreMandatoryFields: true
+        });
+        resp.write(`<script>window.location='${selfUrl}'</script>`);
+      } catch (e) {
+        resp.write(renderError('Failed to deactivate: ' + e.message, selfUrl));
+      }
+      return;
+    }
 
     // Save settings
     const settingsId = p.oa_settings_id;
@@ -135,30 +170,61 @@ define([
     const rows = [];
     search.create({
       type:    C.RECORDS.SETTINGS,
+      filters: [['isinactive', 'is', 'F']],
       columns: Object.values(C.FIELDS.SETTINGS).concat(['internalid'])
     }).run().each(r => {
       rows.push({
-        id:         r.id,
-        subsidiary: r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
-        approver1:  r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
-        emailOn:    r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Yes' : 'No',
-        enablePO:   r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Yes' : 'No',
-        enableVB:   r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Yes' : 'No'
+        id:           r.id,
+        subsidiary:   r.getText(C.FIELDS.SETTINGS.SUBSIDIARY) || '—',
+        subsidiaryId: r.getValue(C.FIELDS.SETTINGS.SUBSIDIARY) || '',
+        approver1:    r.getText(C.FIELDS.SETTINGS.DEFAULT_APPROVER1) || '—',
+        emailOn:      r.getValue(C.FIELDS.SETTINGS.EMAIL_ENABLED) ? 'Yes' : 'No',
+        enablePO:     r.getValue(C.FIELDS.SETTINGS.ENABLE_PO) ? 'Yes' : 'No',
+        enableVB:     r.getValue(C.FIELDS.SETTINGS.ENABLE_VB) ? 'Yes' : 'No'
       });
       return true;
     });
 
-    const tableRows = rows.map(r => `
-      <tr>
-        <td>${r.subsidiary}</td>
-        <td>${r.approver1}</td>
-        <td><span class="badge ${r.emailOn === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
-        <td><span class="badge ${r.enablePO === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
-        <td><span class="badge ${r.enableVB === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
-        <td><a href="${selfUrl}&oa_view=edit&oa_settings_id=${r.id}" class="link">Edit</a></td>
-      </tr>`).join('');
+    // Detect duplicates — multiple active configs for the same subsidiary
+    const subCounts = {};
+    rows.forEach(row => {
+      if (row.subsidiaryId) {
+        subCounts[row.subsidiaryId] = (subCounts[row.subsidiaryId] || 0) + 1;
+      }
+    });
+    const dupSubIds = new Set(Object.keys(subCounts).filter(k => subCounts[k] > 1));
+
+    const dupBanner = dupSubIds.size === 0 ? '' : `
+      <div class="card" style="background:#fef3c7;border-left:4px solid #f59e0b;margin-bottom:20px">
+        <h3 style="color:#92400e;margin:0 0 8px;font-size:14px">⚠ Duplicate configurations detected</h3>
+        <p style="color:#78350f;margin:0;font-size:13px;line-height:1.6">
+          ${dupSubIds.size} subsidiar${dupSubIds.size === 1 ? 'y has' : 'ies have'} multiple active configurations. Only ONE active config per subsidiary is supported — the engine may pick the wrong one. Click <strong>Deactivate</strong> next to the duplicates to remove them, or <strong>Edit</strong> the one you want to keep and Save (auto-deactivates the others).
+        </p>
+      </div>`;
+
+    const tableRows = rows.map(r => {
+      const isDup       = dupSubIds.has(r.subsidiaryId);
+      const dupBadge    = isDup ? ' <span class="badge" style="background:#f59e0b;color:#fff;margin-left:6px">Duplicate</span>' : '';
+      const rowStyle    = isDup ? ' style="background:#fffbeb"' : '';
+      const deactivate  = isDup ? `
+        <form method="POST" action="${selfUrl}" style="display:inline" onsubmit="return confirm('Deactivate this configuration? It will be marked inactive (isinactive=T) but not deleted.')">
+          <input type="hidden" name="oa_action" value="deactivate">
+          <input type="hidden" name="oa_settings_id" value="${r.id}">
+          <button type="submit" class="btn-link-danger" style="margin-left:14px">Deactivate</button>
+        </form>` : '';
+      return `
+        <tr${rowStyle}>
+          <td>${r.subsidiary}${dupBadge}</td>
+          <td>${r.approver1}</td>
+          <td><span class="badge ${r.emailOn === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.emailOn}</span></td>
+          <td><span class="badge ${r.enablePO === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enablePO}</span></td>
+          <td><span class="badge ${r.enableVB === 'Yes' ? 'badge-green' : 'badge-grey'}">${r.enableVB}</span></td>
+          <td><a href="${selfUrl}&oa_view=edit&oa_settings_id=${r.id}" class="link">Edit</a>${deactivate}</td>
+        </tr>`;
+    }).join('');
 
     return _shell('Omnit Approvals — Configuration', `
+      ${dupBanner}
       <div class="page-header">
         <div>
           <h1>Configuration</h1>
@@ -171,7 +237,7 @@ define([
           <thead><tr>
             <th>Subsidiary</th><th>Default approver</th><th>Email</th><th>PO</th><th>VB</th><th></th>
           </tr></thead>
-          <tbody>${tableRows || '<tr><td colspan="6" class="empty">No configurations yet.</td></tr>'}</tbody>
+          <tbody>${tableRows || '<tr><td colspan="6" class="empty">No active configurations yet.</td></tr>'}</tbody>
         </table>
       </div>`, selfUrl);
   }
@@ -302,7 +368,9 @@ define([
     });
     const empOptsHtml = empOpts.join('');
 
-    // Pre-build approver-only options HTML for matrix row dropdowns (filtered by is_approver=T)
+    // Pre-build approver-only options HTML for matrix row dropdowns (filtered by is_approver=T).
+    // If the matrix shows only one person, mark more employees as approvers
+    // via their Employee record (custentity_oa_is_approver=T).
     const apprOpts = ['<option value="">— Select approver —</option>'];
     search.create({
       type:    'employee',
@@ -326,7 +394,7 @@ define([
         </div>
       </div>
 
-      <form method="POST" action="${selfUrl}" onsubmit="syncRowCount()">
+      <form method="POST" action="${selfUrl}" onsubmit="return syncRowCount()">
         <input type="hidden" name="oa_settings_id" value="${settingsId}">
         <input type="hidden" name="oa_subsidiary_name" id="oa_subsidiary_name" value="${s.subsidiary_text || ''}">
 
@@ -448,6 +516,11 @@ define([
 
         ${renderMatrix('vb', 'Approval Matrix — Vendor Bills', vbRows, useAmount, enableVb, baseCurrency)}
         ${renderMatrix('po', 'Approval Matrix — Purchase Orders', poRows, useAmount, enablePo, baseCurrency)}
+
+        <div class="form-actions" style="margin-top:0">
+          <a href="${selfUrl}" class="btn-secondary">Cancel</a>
+          <button type="submit" class="btn-primary">Save settings</button>
+        </div>
       </form>
 
       ${renderMatrixHistory(historyItems)}
@@ -474,8 +547,10 @@ define([
   }
 
   // ─── Approver dropdown (matrix rows) — filtered to is_approver=T employees ────
+  // To add more options here, mark the employee's "Is Approver" checkbox
+  // (custentity_oa_is_approver) on their Employee record.
 
-  function approverSelect(fieldName, selectedId) {
+  function approverSelect(fieldName, selectedId, required) {
     const opts = ['<option value="">— Select approver —</option>'];
     search.create({
       type:    'employee',
@@ -490,7 +565,7 @@ define([
       opts.push(`<option value="${r.id}"${sel}>${r.getValue('entityid')}</option>`);
       return true;
     });
-    return `<select name="${fieldName}">${opts.join('')}</select>`;
+    return `<select name="${fieldName}"${required ? ' required' : ''}>${opts.join('')}</select>`;
   }
 
   // ─── Subsidiary dropdown helper ───────────────────────────────────────────────
@@ -536,8 +611,8 @@ define([
       return `<tr data-row="${i}">
           <td class="prio-col"><button type="button" class="btn-prio" onclick="OA_moveRow('${prefix}',${i},-1)"${upDis}>▲</button><button type="button" class="btn-prio" onclick="OA_moveRow('${prefix}',${i},1)"${downDis}>▼</button></td>
           <td class="amount-col"${colStyle}><span class="amount-wrap"><input type="number" name="${prefix}_row_${i}_min" value="${row.minAmount}" min="0" step="0.01" class="matrix-num">${curTag}</span></td>
-          <td>${approverSelect(prefix + '_row_' + i + '_approver1', row.approver1)}</td>
-          <td>${approverSelect(prefix + '_row_' + i + '_approver2', row.approver2)}</td>
+          <td>${approverSelect(prefix + '_row_' + i + '_approver1', row.approver1, true)}</td>
+          <td>${approverSelect(prefix + '_row_' + i + '_approver2', row.approver2, false)}</td>
           <td><input type="hidden" name="${prefix}_row_${i}_id" value="${row.id}"><button type="button" class="btn-link-danger" onclick="OA_deleteRow(this,'${prefix}')">Delete</button></td>
         </tr>`;
     }).join('');
@@ -879,6 +954,12 @@ window.addRow = function(p) {
     sel.innerHTML = apprTmpl.innerHTML;
   });
 };
+
+// Fallback so the form still submits even if the external client JS didn't load.
+// External JS overrides this with the validating version.
+if (typeof window.syncRowCount !== 'function') {
+  window.syncRowCount = function () { OA_reindex('po'); OA_reindex('vb'); return true; };
+}
 
 function OA_updateCurrency(sel) {
   var opt = sel.options[sel.selectedIndex];

@@ -112,13 +112,13 @@
     }
     td1.appendChild(wrap);
 
-    // Approver 1
+    // Approver 1 — required
     var td2  = document.createElement('td');
     var sel1 = document.createElement('select');
-    sel1.name = p + '_row_' + i + '_approver1'; sel1.innerHTML = opts;
+    sel1.name = p + '_row_' + i + '_approver1'; sel1.required = true; sel1.innerHTML = opts;
     td2.appendChild(sel1);
 
-    // Approver 2
+    // Approver 2 — optional
     var td3  = document.createElement('td');
     var sel2 = document.createElement('select');
     sel2.name = p + '_row_' + i + '_approver2'; sel2.innerHTML = opts;
@@ -145,7 +145,29 @@
     reindex(p);
   };
 
-  window.syncRowCount = function () { reindex('po'); reindex('vb'); };
+  // Validate before save: block submit if any matrix row is missing Approver 1.
+  // Also reindex so server-side row indices line up with the visible order.
+  window.syncRowCount = function () {
+    var errors = [];
+    ['po', 'vb'].forEach(function (p) {
+      var enabledInput = document.querySelector('[name="oa_enable_' + p + '"]');
+      if (!enabledInput || enabledInput.value !== 'T') return;
+      var rows = document.querySelectorAll('#' + p + '-matrix-body tr');
+      rows.forEach(function (tr, i) {
+        var apr1 = tr.querySelector('select[name$="_approver1"]');
+        if (!apr1 || !apr1.value) {
+          errors.push((p === 'po' ? 'Purchase Order' : 'Vendor Bill') + ' matrix row ' + (i + 1) + ': Approver 1 is required');
+        }
+      });
+    });
+    if (errors.length) {
+      alert('Cannot save:\n\n' + errors.join('\n') + '\n\nSelect Approver 1 or delete the row.');
+      return false;
+    }
+    reindex('po');
+    reindex('vb');
+    return true;
+  };
 
   window.setAmountCols = function (show) {
     document.querySelectorAll('.amount-col').forEach(function (el) {
