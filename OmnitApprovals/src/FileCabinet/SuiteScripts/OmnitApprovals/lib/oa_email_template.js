@@ -5,6 +5,12 @@
 define([], () => {
   'use strict';
 
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function buildApprovalEmail(p) {
     const recordLabel = p.recordType === 'purchaseorder' ? 'Purchase Order' : 'Vendor Bill';
     const introText   = p.introText
@@ -14,6 +20,18 @@ define([], () => {
       .replace('{subsidiary}', p.subsidiaryName || '')
       .replace('{docNumber}',  p.documentNumber || '')
       .replace('{requester}',  p.requesterName  || '');
+
+    const safeApproverName   = _esc(p.approverName);
+    const safeDocNumber      = _esc(p.documentNumber);
+    const safeRecordLabel    = _esc(recordLabel);
+    const safeCurrency       = _esc(p.currency);
+    const safeAmount         = _esc(p.amount);
+    const safeRequesterName  = _esc(p.requesterName);
+    const safeSubsidiaryName = _esc(p.subsidiaryName);
+    const safeDeclineLabel   = _esc(p.declineLabel || 'Reject');
+    const safeApproveLabel   = _esc(p.approveLabel || 'Approve');
+    const safeSupportEmail   = _esc(p.supportEmail || 'support@omnit.dk');
+    const safeIntro          = _esc(intro);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -54,36 +72,44 @@ define([], () => {
     <div class="logo-sub">Omnit Approvals</div>
   </div>
   <div class="body">
-    <h1>Hi ${p.approverName},</h1>
+    <h1>Hi ${safeApproverName},</h1>
     <p class="sub">Your approval is required</p>
-    <p>${intro}</p>
+    <p>${safeIntro}</p>
     <div class="meta">
-      <div class="row"><span class="lbl">Document number</span><span class="val">${p.documentNumber}</span></div>
-      <div class="row"><span class="lbl">Type</span><span class="val">${recordLabel}</span></div>
-      <div class="row"><span class="lbl">Amount</span><span class="val">${p.currency} ${p.amount}</span></div>
-      <div class="row"><span class="lbl">Submitted by</span><span class="val">${p.requesterName}</span></div>
-      <div class="row"><span class="lbl">Subsidiary</span><span class="val">${p.subsidiaryName}</span></div>
+      <div class="row"><span class="lbl">Document number</span><span class="val">${safeDocNumber}</span></div>
+      <div class="row"><span class="lbl">Type</span><span class="val">${safeRecordLabel}</span></div>
+      <div class="row"><span class="lbl">Amount</span><span class="val">${safeCurrency} ${safeAmount}</span></div>
+      <div class="row"><span class="lbl">Submitted by</span><span class="val">${safeRequesterName}</span></div>
+      <div class="row"><span class="lbl">Subsidiary</span><span class="val">${safeSubsidiaryName}</span></div>
     </div>
     <p>Please approve or reject this transaction as soon as possible.</p>
     <div class="btns">
-      <a href="${p.declineUrl}" class="btn btn-decline">${p.declineLabel || 'Reject'}</a>
-      <a href="${p.approveUrl}" class="btn btn-approve">${p.approveLabel || 'Approve'}</a>
+      <a href="${p.declineUrl}" class="btn btn-decline">${safeDeclineLabel}</a>
+      <a href="${p.approveUrl}" class="btn btn-approve">${safeApproveLabel}</a>
     </div>
     <hr>
     <div class="faq">
       <strong>Why am I receiving this email?</strong><br>
-      You are registered as an approver for ${p.subsidiaryName} in Omnit Approvals.<br><br>
+      You are registered as an approver for ${safeSubsidiaryName} in Omnit Approvals.<br><br>
       <strong>Approve via NetSuite:</strong> Log in and open the Omnit Approvals dashboard to process pending transactions in bulk.
     </div>
   </div>
   <div class="ftr">
-    Questions? Contact the accounting team or <a href="mailto:${p.supportEmail || 'support@omnit.dk'}">${p.supportEmail || 'support@omnit.dk'}</a>
+    Questions? Contact the accounting team or <a href="mailto:${safeSupportEmail}">${safeSupportEmail}</a>
   </div>
 </div>
 </body></html>`;
   }
 
   function buildDeclineCommentPage(p) {
+    const safeDocNumber      = _esc(p.documentNumber);
+    const safeSubsidiaryName = _esc(p.subsidiaryName);
+    const safeCurrency       = _esc(p.currency);
+    const safeAmount         = _esc(p.amount);
+    const safeToken          = _esc(p.token);
+    const safeRecordType     = _esc(p.recordType);
+    const safeRecordId       = _esc(p.recordId);
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -103,13 +129,13 @@ define([], () => {
 <body>
 <div class="card">
   <h2>Reject transaction</h2>
-  <p class="sub">${p.documentNumber} &mdash; ${p.subsidiaryName}</p>
-  <div class="doc">Amount: <strong>${p.currency} ${p.amount}</strong></div>
+  <p class="sub">${safeDocNumber} &mdash; ${safeSubsidiaryName}</p>
+  <div class="doc">Amount: <strong>${safeCurrency} ${safeAmount}</strong></div>
   <form method="POST" action="${p.actionUrl}">
-    <input type="hidden" name="oa_token" value="${p.token}">
+    <input type="hidden" name="oa_token" value="${safeToken}">
     <input type="hidden" name="oa_action" value="decline">
-    <input type="hidden" name="oa_record_type" value="${p.recordType}">
-    <input type="hidden" name="oa_record_id" value="${p.recordId}">
+    <input type="hidden" name="oa_record_type" value="${safeRecordType}">
+    <input type="hidden" name="oa_record_id" value="${safeRecordId}">
     <label for="comment">Reason for rejection (required):</label>
     <textarea id="comment" name="oa_comment" required placeholder="Describe why you are rejecting this transaction..."></textarea>
     <button type="submit" class="btn">Confirm rejection</button>

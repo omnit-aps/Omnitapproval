@@ -144,6 +144,12 @@ define([
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId) {
     const totalApproved = rows.filter(r => r.status === C.APPROVAL_STATUS.APPROVED).reduce((s, r) => s + r.amount, 0);
     const totalRejected = rows.filter(r => r.status === C.APPROVAL_STATUS.REJECTED).reduce((s, r) => s + r.amount, 0);
@@ -153,35 +159,40 @@ define([
 
     const tableRows = rows.map(r => {
       const isAssigned = String(r.nextApproverId) === String(userId);
-      const actionOptions = isAssigned
-        ? `<option value="">— Select action —</option>
-           <option value="approve">Approve</option>
-           <option value="decline">Reject</option>
-           <option value="skip">Skip</option>`
-        : `<option value="">— Select action —</option>
-           <option value="reassign">Reassign</option>
-           <option value="skip">Skip</option>`;
+      const isPending  = r.status === C.APPROVAL_STATUS.PENDING;
+      const actionOptions = !isPending
+        ? `<option value="">— Not pending —</option>`
+        : isAssigned
+          ? `<option value="">— Select action —</option>
+             <option value="approve">Approve</option>
+             <option value="decline">Reject</option>
+             <option value="skip">Skip</option>`
+          : `<option value="">— Select action —</option>
+             <option value="reassign">Reassign</option>
+             <option value="skip">Skip</option>`;
       return `
-      <tr data-id="${r.id}" data-type="${r.type}">
+      <tr data-id="${_esc(r.id)}" data-type="${_esc(r.type)}">
         <td>
-          <select class="action-select" data-id="${r.id}">
+          <select class="action-select" data-id="${_esc(r.id)}"${!isPending ? ' disabled' : ''}>
             ${actionOptions}
           </select>
         </td>
-        <td>${isAssigned
-          ? `<input type="text" class="reason-input" data-id="${r.id}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-          : `<input type="text" class="reassign-input" data-id="${r.id}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+        <td>${isPending && isAssigned
+          ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+          : isPending
+            ? `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+            : ''
         }</td>
-        <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${r.typeLabel}</span></td>
-        <td class="fw500">${r.entity || '—'}</td>
-        <td class="mono">${r.tranid}</td>
-        <td>${r.currency}</td>
-        <td>${r.subsidiary}</td>
-        <td class="amount">${r.currency} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-        <td>${r.submittedBy || '—'}</td>
-        <td>${r.nextApprover}</td>
-        <td class="muted">${r.created || '—'}</td>
-        <td><span class="badge ${r.statusClass}">${r.statusLabel}</span></td>
+        <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${_esc(r.typeLabel)}</span></td>
+        <td class="fw500">${_esc(r.entity) || '—'}</td>
+        <td class="mono">${_esc(r.tranid)}</td>
+        <td>${_esc(r.currency)}</td>
+        <td>${_esc(r.subsidiary)}</td>
+        <td class="amount">${_esc(r.currency)} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td>${_esc(r.submittedBy) || '—'}</td>
+        <td>${_esc(r.nextApprover)}</td>
+        <td class="muted">${_esc(r.created) || '—'}</td>
+        <td><span class="badge ${r.statusClass}">${_esc(r.statusLabel)}</span></td>
       </tr>`;
     }).join('') || '<tr><td colspan="12" class="empty">No transactions match the filter.</td></tr>';
 
@@ -366,8 +377,10 @@ async function submitAll() {
       body:    JSON.stringify({ actions })
     });
     const data = await res.json();
-    const ok   = data.results.filter(r => r.success).length;
-    const fail = data.results.filter(r => !r.success).length;
+    if (data.error) { showToast('Access denied: ' + data.error); btn.disabled = false; btn.textContent = 'Submit approvals'; return; }
+    const results = data.results || [];
+    const ok   = results.filter(r => r.success).length;
+    const fail = results.filter(r => !r.success).length;
     showToast(\`Done: \${ok} processed\${fail ? ', ' + fail + ' failed' : ''}.\`);
     setTimeout(() => window.location.reload(), 1800);
   } catch (e) {

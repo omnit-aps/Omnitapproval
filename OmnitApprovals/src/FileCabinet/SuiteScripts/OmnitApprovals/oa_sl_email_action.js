@@ -104,7 +104,10 @@ define([
         token,
         actionUrl
       }));
+      return;
     }
+
+    resp.write(_errorPage('Unknown action. Please use the link from your approval email.'));
   }
 
   // ─── POST: UI button actions + decline form submit ────────────────────────────
@@ -130,7 +133,13 @@ define([
       }
 
       // Verify live state
-      const fields       = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['nextapprover', 'approvalstatus'] });
+      let fields;
+      try {
+        fields = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['nextapprover', 'approvalstatus'] });
+      } catch (e) {
+        resp.write(_errorPage('Transaction not found or is no longer accessible.'));
+        return;
+      }
       const liveApprover = fields.nextapprover && fields.nextapprover[0] ? String(fields.nextapprover[0].value) : null;
       if (liveApprover !== String(payload.aid)) {
         resp.write(_errorPage('This link is no longer valid.'));

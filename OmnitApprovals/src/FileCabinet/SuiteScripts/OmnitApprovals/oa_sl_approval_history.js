@@ -93,6 +93,12 @@ define([
     return wasActor;
   }
 
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function _render(recordId, recordType) {
     // ── Transaction summary (native fields only) ──────────────────────────────
     const txn = search.lookupFields({
@@ -155,14 +161,14 @@ define([
       const ts     = l.timestamp
         ? l.timestamp.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
-      const who    = l.target ? `${l.actor} <span class="arrow">→</span> ${l.target}` : l.actor;
+      const who    = l.target ? `${_esc(l.actor)} <span class="arrow">→</span> ${_esc(l.target)}` : _esc(l.actor);
       return `<tr>
-        <td class="ts">${ts}</td>
-        <td><span class="pill" style="background:${color}18;color:${color};border:1px solid ${color}30">${label}</span></td>
-        <td class="center">Step&nbsp;${l.step || '—'}</td>
+        <td class="ts">${_esc(ts)}</td>
+        <td><span class="pill" style="background:${_esc(color)}18;color:${_esc(color)};border:1px solid ${_esc(color)}30">${_esc(label)}</span></td>
+        <td class="center">Step&nbsp;${_esc(l.step || '—')}</td>
         <td>${who}</td>
-        <td><span class="src">${src}</span></td>
-        <td class="comment">${l.comment ? `<span class="comment-text">${l.comment}</span>` : ''}</td>
+        <td><span class="src">${_esc(src)}</span></td>
+        <td class="comment">${l.comment ? `<span class="comment-text">${_esc(l.comment)}</span>` : ''}</td>
       </tr>`;
     }).join('') : `<tr><td colspan="6" class="empty">No approval activity recorded yet.</td></tr>`;
 
