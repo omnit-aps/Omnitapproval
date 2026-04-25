@@ -45,12 +45,13 @@ define([
     const validTypes = rtMap[recordType] || [];
     if (!validTypes.length) return null;
 
+    // STATUS and RECORD_TYPE are TEXT fields — must use 'is', not 'anyof' (anyof on TEXT silently returns 0 matches)
     const filters = [
       [C.FIELDS.HIERARCHY.SETTINGS, 'equalto', settingsId],
       'AND',
-      [C.FIELDS.HIERARCHY.STATUS, 'anyof', [C.HIERARCHY_STATUS.ACTIVE]],
+      [C.FIELDS.HIERARCHY.STATUS, 'is', C.HIERARCHY_STATUS.ACTIVE],
       'AND',
-      [[C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', [validTypes[0]]], 'OR', [C.FIELDS.HIERARCHY.RECORD_TYPE, 'anyof', [validTypes[1]]]],
+      [[C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[0]], 'OR', [C.FIELDS.HIERARCHY.RECORD_TYPE, 'is', validTypes[1]]],
       'AND',
       [C.FIELDS.HIERARCHY.START_DATE, 'onorbefore', 'today'],
       'AND',
@@ -156,13 +157,14 @@ define([
   // ─── Step helper ─────────────────────────────────────────────────────────────
 
   function _countApprovedLogs(recordId) {
+    // ACTION is a TEXT field — must use 'is', not 'anyof'
     let count = 0;
     search.create({
       type:    C.RECORDS.LOG,
       filters: [
         [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
         'AND',
-        [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.APPROVED]]
+        [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED]
       ],
       columns: ['internalid']
     }).run().each(() => { count++; return true; });

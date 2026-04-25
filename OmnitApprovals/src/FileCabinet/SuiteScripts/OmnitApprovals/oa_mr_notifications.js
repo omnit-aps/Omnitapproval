@@ -102,7 +102,7 @@ define([
         filters: [
           [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
           'AND',
-          [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.APPROVED]]
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED]
         ],
         columns: ['internalid']
       }).run().each(() => { approvedCount++; return true; });
@@ -115,7 +115,7 @@ define([
         filters: [
           [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
           'AND',
-          [C.FIELDS.LOG.ACTION, 'anyof', [C.LOG_ACTIONS.SUBMITTED]]
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTED]
         ],
         columns: [C.FIELDS.LOG.ACTOR]
       }).run().each(r => {

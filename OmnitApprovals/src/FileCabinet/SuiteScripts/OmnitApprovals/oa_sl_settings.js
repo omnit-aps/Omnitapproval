@@ -239,10 +239,15 @@ define([
       try {
         search.create({
           type:    C.RECORDS.HIERARCHY,
+          // STATUS is a TEXT field — multi-value match must be OR'd 'is' filters, not 'anyof'
           filters: [
             [C.FIELDS.HIERARCHY.SETTINGS, 'equalto', settingsId],
             'AND',
-            [C.FIELDS.HIERARCHY.STATUS, 'anyof', [C.HIERARCHY_STATUS.DRAFT, C.HIERARCHY_STATUS.EXPIRED]]
+            [
+              [C.FIELDS.HIERARCHY.STATUS, 'is', C.HIERARCHY_STATUS.DRAFT],
+              'OR',
+              [C.FIELDS.HIERARCHY.STATUS, 'is', C.HIERARCHY_STATUS.EXPIRED]
+            ]
           ],
           columns: [
             'internalid',
