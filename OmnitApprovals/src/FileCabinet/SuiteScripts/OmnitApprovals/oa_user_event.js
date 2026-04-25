@@ -20,10 +20,12 @@ define([
   // Execution Log that the deployment is actually bound to the record type.
 
   function beforeSubmit(context) {
+    log.audit('OA-UE-BEFORE fired', 'entry');  // bulletproof first-line — no property access
+
     try {
       const rec  = context.newRecord;
       const user = runtime.getCurrentUser();
-      log.audit('OA-UE-BEFORE entry', {
+      log.audit('OA-UE-BEFORE detail', {
         type:        context.type,
         recordType:  rec && rec.type,
         recordId:    rec && rec.id,
@@ -32,36 +34,43 @@ define([
         execContext: runtime.executionContext
       });
     } catch (e) {
-      log.error('OA-UE-BEFORE breadcrumb failed', e.message);
+      log.error('OA-UE-BEFORE detail failed', e.message);
     }
   }
 
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
 
   function afterSubmit(context) {
-    const rec        = context.newRecord;
-    const recordType = rec && rec.type;
-    const recordId   = rec && rec.id;
-    const execContext = runtime.executionContext;
-    const user       = runtime.getCurrentUser();
+    log.audit('OA-UE-AFTER fired', 'entry');  // bulletproof first-line — no property access
 
-    log.audit('OA-UE-AFTER entry', {
-      type:        context.type,
-      recordType,
-      recordId,
-      role:        user && user.role,
-      userId:      user && user.id,
-      execContext
-    });
-
-    const TRIGGER = context.UserEventType;
-    if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
-      log.debug('OA-UE skip: trigger', context.type);
+    let rec, recordType, recordId, execContext, user;
+    try {
+      rec         = context.newRecord;
+      recordType  = rec && rec.type;
+      recordId    = rec && rec.id;
+      execContext = runtime.executionContext;
+      user        = runtime.getCurrentUser();
+      log.audit('OA-UE-AFTER detail', {
+        type:        context.type,
+        recordType,
+        recordId,
+        role:        user && user.role,
+        userId:      user && user.id,
+        execContext
+      });
+    } catch (e) {
+      log.error('OA-UE-AFTER detail failed', e.message);
       return;
     }
 
-    // Allow human-driven and integration-driven creates (UI, SOAP, custom Restlets, REST Web Services API).
-    // Exclude background contexts (CSV import, scheduled, map/reduce, workflow, mass update) so bulk loads don't auto-route.
+    const TRIGGER = context.UserEventType;
+    if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
+      log.audit('OA-UE skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
+      return;
+    }
+
+    // Allow human-driven and integration-driven creates (UI, SOAP, Restlets, REST Web Services).
+    // Exclude background contexts (CSV, scheduled, map/reduce, workflow, mass update) so bulk loads don't auto-route.
     const allowed = [
       runtime.ContextType.USER_INTERFACE,
       runtime.ContextType.WEBSERVICES,
@@ -69,44 +78,46 @@ define([
       runtime.ContextType.RESTWEBSERVICES
     ];
     if (!allowed.includes(execContext)) {
-      log.debug('OA-UE skip: execContext', execContext);
+      log.audit('OA-UE skip', { reason: 'execContext not in allowed list', execContext, recordId });
       return;
     }
 
     // ── Status guard ─────────────────────────────────────────────────────────
-    // NetSuite defaults approvalstatus to 2 (Approved) on a new transaction
-    // when no native approval workflow is configured. The OLD code bailed on
-    // 'currentStatus === APPROVED' which silently skipped every CREATE — that
-    // was the actual root cause of zero log entries on any transaction.
-    //
-    // Replaced with transition-aware logic:
-    //   CREATE: always route. We override NS's default status=Approved.
-    //   EDIT:   re-route ONLY when the user manually edits a Rejected record
-    //           (oldStatus === REJECTED AND newStatus === REJECTED, i.e. the
-    //           user changed a field but didn't change the approval status).
-    //           Every other EDIT — including the engine's own internal
-    //           save() calls — is skipped, because those always TRANSITION
-    //           the status (PENDING→APPROVED, PENDING→REJECTED,
-    //           Approved-default→PENDING, etc.).
+    // CREATE: always route. NetSuite defaults approvalstatus=2 (Approved) on
+    //   new transactions when no native approval workflow is configured —
+    //   that "Approved" is just a default, not a real prior approval.
+    // EDIT:   skip ONLY if this transaction already has OA audit log entries.
+    //   No OA history → was never routed by OA → eligible, route as if CREATE.
+    //   Has OA history → already managed by OA, skip.
     const currentStatus = rec.getValue('approvalstatus');
+
     if (context.type === TRIGGER.EDIT) {
-      const oldStatus = context.oldRecord ? context.oldRecord.getValue('approvalstatus') : null;
-      const isResubmission = oldStatus === C.APPROVAL_STATUS.REJECTED && currentStatus === C.APPROVAL_STATUS.REJECTED;
-      if (!isResubmission) {
-        log.debug('OA-UE skip: EDIT not a resubmission', { recordId, oldStatus, currentStatus });
+      let hasOaHistory = false;
+      try {
+        search.create({
+          type:    C.RECORDS.LOG,
+          filters: [[C.FIELDS.LOG.TRANSACTION, 'anyof', recordId]],
+          columns: ['internalid']
+        }).run().each(() => { hasOaHistory = true; return false; });
+      } catch (e) {
+        log.error('OA-UE: OA log history check failed', e.message);
+      }
+      if (hasOaHistory) {
+        log.audit('OA-UE skip', { reason: 'EDIT on record with existing OA history', recordId, currentStatus });
         return;
       }
+      log.audit('OA-UE: EDIT on unrouted record — routing as if CREATE', { recordId, currentStatus });
     }
 
     const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
     if (!subsidiaryId) {
-      log.debug('OA-UE skip: no subsidiary on record', { recordId, recordType });
+      log.audit('OA-UE skip', { reason: 'no subsidiary on record', recordId, recordType });
       return;
     }
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId);
     if (result.error) {
-      log.audit('OA-UE skip: routeForApproval error', { recordId, error: result.error });
+      log.audit('OA-UE skip', { reason: 'routeForApproval error', recordId, error: result.error });
       return;
     }
     log.audit('OA-UE routing', { recordId, approver1: result.approver1, hierarchyId: result.hierarchyId });
@@ -114,7 +125,7 @@ define([
     const { approver1, hierarchyId } = result;
 
     if (!approver1) {
-      log.error('OA-UE: no approver resolved — aborting, record left in its current status', { recordId, recordType });
+      log.audit('OA-UE skip', { reason: 'no approver resolved by routeForApproval', recordId, recordType });
       return;
     }
 
@@ -159,24 +170,26 @@ define([
   // ─── beforeLoad ──────────────────────────────────────────────────────────────
 
   function beforeLoad(context) {
-    const rec    = context.newRecord;
-    const recordType = rec && rec.type;
-    const recordId   = rec && rec.id;
-    const execContext = runtime.executionContext;
+    log.audit('OA-UE-LOAD fired', 'entry');  // bulletproof first-line — no property access
 
-    log.audit('OA-UE beforeLoad entry', {
-      type:        context.type,
-      recordType,
-      recordId,
-      execContext
-    });
+    let rec, recordType, recordId, execContext;
+    try {
+      rec         = context.newRecord;
+      recordType  = rec && rec.type;
+      recordId    = rec && rec.id;
+      execContext = runtime.executionContext;
+      log.audit('OA-UE-LOAD detail', { type: context.type, recordType, recordId, execContext });
+    } catch (e) {
+      log.error('OA-UE-LOAD detail failed', e.message);
+      return;
+    }
 
     if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) {
-      log.debug('OA-UE beforeLoad skip: trigger', context.type);
+      log.audit('OA-UE-LOAD skip', { reason: 'trigger not VIEW/EDIT', type: context.type, recordId });
       return;
     }
     if (execContext !== runtime.ContextType.USER_INTERFACE) {
-      log.debug('OA-UE beforeLoad skip: execContext', execContext);
+      log.audit('OA-UE-LOAD skip', { reason: 'execContext not USER_INTERFACE', execContext, recordId });
       return;
     }
 
