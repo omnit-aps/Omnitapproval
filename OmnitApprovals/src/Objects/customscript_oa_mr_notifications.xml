@@ -5,6 +5,26 @@
   <isinactive>F</isinactive>
   <notifyadmins>F</notifyadmins>
   <notifyowner>T</notifyowner>
+  <scriptcustomfields>
+    <scriptcustomfield scriptid="custscript_oa_mr_record_id">
+      <label>Record Internal ID</label>
+      <fieldtype>FREEFORMTEXT</fieldtype>
+      <accesslevel>2</accesslevel>
+      <displaytype>NORMAL</displaytype>
+      <ismandatory>F</ismandatory>
+      <isparameter>T</isparameter>
+      <storevalue>T</storevalue>
+    </scriptcustomfield>
+    <scriptcustomfield scriptid="custscript_oa_mr_record_type">
+      <label>Record Type</label>
+      <fieldtype>FREEFORMTEXT</fieldtype>
+      <accesslevel>2</accesslevel>
+      <displaytype>NORMAL</displaytype>
+      <ismandatory>F</ismandatory>
+      <isparameter>T</isparameter>
+      <storevalue>T</storevalue>
+    </scriptcustomfield>
+  </scriptcustomfields>
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_mr_notifications">
       <title>OA - Email Notifications</title>
