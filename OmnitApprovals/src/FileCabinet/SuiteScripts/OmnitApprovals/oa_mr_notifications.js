@@ -130,7 +130,7 @@ define([
 
       const approveLabel = settings.approve_string || 'Approve';
       const declineLabel = settings.reject_string  || 'Reject';
-      const supportEmail = settings.support_email  || '';
+      const supportEmail = '';
       const expiryDays   = settings.token_expiry_days ? parseInt(settings.token_expiry_days, 10) : 7;
       const emailSubject = (settings.email_subject || 'Approval required — {docNumber}')
         .replace('{docNumber}', documentNumber);

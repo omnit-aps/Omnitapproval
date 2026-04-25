@@ -9,10 +9,11 @@ define([
   'N/search',
   'N/task',
   'N/url',
+  'N/ui/serverWidget',
   './lib/oa_constants',
   './lib/oa_utils',
   './oa_engine'
-], (record, runtime, search, task, url, C, utils, engine) => {
+], (record, runtime, search, task, url, serverWidget, C, utils, engine) => {
   'use strict';
 
   // ─── beforeSubmit ────────────────────────────────────────────────────────────
@@ -229,6 +230,45 @@ define([
     form.clientScriptModulePath = './oa_client_script';
     const userId = runtime.getCurrentUser().id;
     const status = rec.getValue('approvalstatus');
+
+    // ── OA info tab ──────────────────────────────────────────────────────────
+    try {
+      const oaTab = form.addTab({ id: 'custpage_oa_tab', label: 'Omnit Approvals' });
+      const fg    = form.addFieldGroup({ id: 'custpage_oa_fg', label: 'Approval Status', tab: 'custpage_oa_tab' });
+
+      const statusField = form.addField({ id: 'custpage_oa_status', type: serverWidget.FieldType.TEXT, label: 'Approval Status', container: 'custpage_oa_fg' });
+      statusField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+      statusField.defaultValue = status === C.APPROVAL_STATUS.PENDING  ? 'Pending Approval'
+                               : status === C.APPROVAL_STATUS.APPROVED ? 'Approved'
+                               : status === C.APPROVAL_STATUS.REJECTED ? 'Rejected' : '—';
+
+      const nextApproverId = rec.getValue('nextapprover');
+      let nextApproverName = '—';
+      if (nextApproverId) {
+        try {
+          const emp = search.lookupFields({ type: 'employee', id: nextApproverId, columns: ['firstname', 'lastname'] });
+          nextApproverName = ((emp.firstname || '') + ' ' + (emp.lastname || '')).trim() || String(nextApproverId);
+        } catch (e) { nextApproverName = String(nextApproverId); }
+      }
+      const approverField = form.addField({ id: 'custpage_oa_approver', type: serverWidget.FieldType.TEXT, label: 'Next Approver', container: 'custpage_oa_fg' });
+      approverField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+      approverField.defaultValue = nextApproverName;
+
+      // Submitted-by from OA log
+      let submittedBy = '—';
+      try {
+        search.create({
+          type:    C.RECORDS.LOG,
+          filters: [[C.FIELDS.LOG.TRANSACTION, 'equalto', rec.id], 'AND', [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTED]],
+          columns: [C.FIELDS.LOG.ACTOR]
+        }).run().getRange({ start: 0, end: 1 }).forEach(r => { submittedBy = r.getText(C.FIELDS.LOG.ACTOR) || '—'; });
+      } catch (e) { /* graceful */ }
+      const submittedField = form.addField({ id: 'custpage_oa_submitted_by', type: serverWidget.FieldType.TEXT, label: 'Submitted By', container: 'custpage_oa_fg' });
+      submittedField.updateDisplayType({ displayType: serverWidget.FieldDisplayType.INLINE });
+      submittedField.defaultValue = submittedBy;
+    } catch (e) {
+      log.error('OA-UE-LOAD: failed to add OA tab', e.message);
+    }
 
     // Show history button when OA audit log entries exist for this record
     let hasLog = false;

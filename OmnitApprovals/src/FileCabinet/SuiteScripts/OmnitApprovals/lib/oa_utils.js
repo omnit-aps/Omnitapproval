@@ -5,9 +5,10 @@
 define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, search, encode) => {
   'use strict';
 
-  // Shared secret for HMAC tokens. Default is the built-in fallback; call
-  // setHmacSecret() at script startup to use the value from the script parameter.
-  let HMAC_SECRET = 'OA-OMNIT-2025-STATIC-SECRET-v1';
+  // HMAC secret — must be set via setHmacSecret() at script startup.
+  // No built-in fallback: token generation and verification fail closed
+  // (return null) if the secret has not been configured via script parameter.
+  let HMAC_SECRET = '';
   function setHmacSecret(s) { if (s) HMAC_SECRET = s; }
 
   // ─── HMAC token helpers ───────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
    * Format: base64url(payload) + "." + sha256(SECRET|base64url(payload))
    */
   function generateHmacToken(recordType, recordId, step, approverId, expiryDays) {
+    if (!HMAC_SECRET) { log.error('OA: HMAC secret not configured — token generation skipped'); return null; }
     const exp  = Date.now() + (expiryDays || 7) * 86400000;
     const body = _b64urlEncode(JSON.stringify({
       rt:  recordType,
@@ -52,9 +54,10 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
   }
 
   /**
-   * Verify a token and return its payload, or null if invalid/expired.
+   * Verify a token and return its payload, or null if invalid/expired/unconfigured.
    */
   function verifyHmacToken(token) {
+    if (!HMAC_SECRET) { log.error('OA: HMAC secret not configured — token verification rejected'); return null; }
     if (!token) return null;
     const dot = token.lastIndexOf('.');
     if (dot < 0) return null;

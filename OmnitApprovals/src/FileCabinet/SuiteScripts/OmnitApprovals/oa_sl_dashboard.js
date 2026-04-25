@@ -50,7 +50,8 @@ define([
       return;
     }
 
-    const body    = JSON.parse(req.body || '{}');
+    let body;
+    try { body = JSON.parse(req.body || '{}'); } catch (e) { body = {}; }
     const actions = body.actions || [];
 
     const results = actions.map(a => {
@@ -328,6 +329,7 @@ function setFilter(key, val) {
 function resetAll() {
   document.querySelectorAll('.action-select').forEach(s => s.value = '');
   document.querySelectorAll('.reason-input').forEach(i => i.value = '');
+  document.querySelectorAll('.reassign-input').forEach(i => i.value = '');
 }
 
 async function submitAll() {
@@ -338,8 +340,8 @@ async function submitAll() {
     const id          = row.dataset.id;
     const type        = row.dataset.type;
     const action      = row.querySelector('.action-select').value;
-    const reason      = row.querySelector('.reason-input').value;
-    const newApprover = row.querySelector('.reassign-input') ? row.querySelector('.reassign-input').value.trim() : '';
+    const reason      = row.querySelector('.reason-input')?.value || '';
+    const newApprover = row.querySelector('.reassign-input')?.value.trim() || '';
     if (!action || action === 'skip') return;
     if (action === 'decline' && !reason.trim()) {
       showToast('Please provide a reason for all rejections.'); valid = false; return;

@@ -67,13 +67,19 @@ define([
       hierarchies.push({
         id:          r.id,
         name:        r.getValue(C.FIELDS.HIERARCHY.NAME),
+        recordType:  r.getValue(C.FIELDS.HIERARCHY.RECORD_TYPE),
         highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)
       });
       return true;
     });
 
     if (!hierarchies.length) return null;
-    hierarchies.sort((a, b) => a.id - b.id);
+    // Specific record type (PO/VB) beats BOTH; within same specificity lowest id wins.
+    hierarchies.sort((a, b) => {
+      const aGeneral = a.recordType === C.HIERARCHY_RECORD_TYPES.BOTH ? 1 : 0;
+      const bGeneral = b.recordType === C.HIERARCHY_RECORD_TYPES.BOTH ? 1 : 0;
+      return aGeneral !== bGeneral ? aGeneral - bGeneral : a.id - b.id;
+    });
     const h = hierarchies[0];
 
     const thresholds = [];
