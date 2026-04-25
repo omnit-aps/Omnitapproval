@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customcenterlink scriptid="custcenterlink_oa_settings_accountant">
+  <label>Approval Settings</label>
+  <centertab>[custcentertab_oa_accountant]</centertab>
+  <url>/app/site/hosting/scriptlet.nl?script=customscript_oa_sl_settings&amp;deploy=customdeploy_oa_sl_settings</url>
+</customcenterlink>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customcenterlink scriptid="custcenterlink_oa_dashboard_accountant">
+  <label>Bulk Approval Dashboard</label>
+  <centertab>[custcentertab_oa_accountant]</centertab>
+  <url>/app/site/hosting/scriptlet.nl?script=customscript_oa_sl_dashboard&amp;deploy=customdeploy_oa_sl_dashboard</url>
+</customcenterlink>
