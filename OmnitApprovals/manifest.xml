@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NOTE: This file is a duplicate kept in sync with src/manifest.xml
+  but it is NOT the manifest used by suitecloud project:deploy.
+  suitecloud.config.js sets defaultProjectFolder = 'src', so the
+  manifest that ships with the bundle is src/manifest.xml. Always
+  edit BOTH if you change project dependencies.
+-->
 <manifest projecttype="ACCOUNTCUSTOMIZATION">
   <projectname>OmnitApprovals</projectname>
   <frameworkversion>1.0</frameworkversion>
   <dependencies>
     <features>
       <feature required="true">SUBSIDIARIES</feature>
+      <feature required="true">SERVERSIDESCRIPTING</feature>
       <feature required="true">APPROVALROUTING</feature>
+      <feature required="false">ACCOUNTING</feature>
+      <feature required="false">CRM</feature>
     </features>
   </dependencies>
 </manifest>
