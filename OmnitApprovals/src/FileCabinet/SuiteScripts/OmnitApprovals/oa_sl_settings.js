@@ -89,6 +89,26 @@ define([
         return;
       }
 
+      // Validate: when use_amount is ON, every visible matrix row must have Approver 1 set.
+      // (Client-side blocks this, but server-side guard catches programmatic POSTs and stale forms.)
+      if (p.oa_use_amount === 'T') {
+        const matrixErrors = [];
+        ['po', 'vb'].forEach(prefix => {
+          if (p['oa_enable_' + prefix] !== 'T') return;
+          const count = parseInt(p[prefix + '_row_count'], 10) || 0;
+          for (let i = 0; i < count; i++) {
+            const a1 = parseInt(p[prefix + '_row_' + i + '_approver1'], 10);
+            if (!a1) {
+              matrixErrors.push((prefix === 'po' ? 'Purchase Order' : 'Vendor Bill') + ' matrix row ' + (i + 1) + ': Approver 1 is required.');
+            }
+          }
+        });
+        if (matrixErrors.length) {
+          resp.write(renderError('Cannot save:\n\n' + matrixErrors.join('\n'), selfUrl));
+          return;
+        }
+      }
+
       // Validate: only one active settings record per subsidiary
       const subsidiaryId = parseInt(p.oa_subsidiary, 10);
       if (subsidiaryId) {

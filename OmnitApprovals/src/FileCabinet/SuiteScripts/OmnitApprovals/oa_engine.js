@@ -109,38 +109,45 @@ define([
 
   // ─── Routing ─────────────────────────────────────────────────────────────────
 
-  function routeForApproval(recordType, recordId, subsidiaryId) {
+  function routeForApproval(recordType, recordId, subsidiaryId, amountOverride) {
     const settings = getSettingsForSubsidiary(subsidiaryId);
-    if (!settings) return { error: 'NO_SETTINGS' };
+    if (!settings) {
+      log.audit('OA-ENGINE routeForApproval', { recordType, recordId, subsidiaryId, error: 'NO_SETTINGS' });
+      return { error: 'NO_SETTINGS' };
+    }
 
     const rtEnabled = recordType === C.RECORD_TYPES.PURCHASE_ORDER
       ? settings.enable_po
       : settings.enable_vb;
-    if (!rtEnabled) return { error: 'RECORD_TYPE_DISABLED' };
+    if (!rtEnabled) {
+      log.audit('OA-ENGINE routeForApproval', { recordType, recordId, subsidiaryId, error: 'RECORD_TYPE_DISABLED' });
+      return { error: 'RECORD_TYPE_DISABLED' };
+    }
 
     const approverCount = parseInt(settings.approver_count, 10) || 1;
     let approver1 = null;
     let approver2 = null;
     let hierarchyId = null;
+    let matchedThresholdId = null;
+    let amount = null;
 
     if (settings.use_amount) {
       const hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
         hierarchyId = hierarchy.id;
-        const amount   = utils.getTransactionAmount(recordType, recordId);
+        amount = (typeof amountOverride === 'number') ? amountOverride : utils.getTransactionAmount(recordType, recordId);
         const matching = hierarchy.thresholds.filter(t => amount >= t.minAmount && amount <= t.maxAmount);
 
+        let matched = null;
         if (hierarchy.highestOnly) {
-          const highest = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
-          if (highest) {
-            approver1 = highest.approver;
-            if (approverCount >= 2) approver2 = highest.approver2 || null;
-          }
+          matched = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
         } else {
-          if (matching[0]) {
-            approver1 = matching[0].approver;
-            if (approverCount >= 2) approver2 = matching[0].approver2 || null;
-          }
+          matched = matching[0] || null;
+        }
+        if (matched) {
+          matchedThresholdId = matched.id || null;
+          approver1 = matched.approver;
+          if (approverCount >= 2) approver2 = matched.approver2 || null;
         }
       }
     }
@@ -150,6 +157,15 @@ define([
 
     approver1 = resolveApprover(approver1);
     approver2 = resolveApprover(approver2);
+
+    log.audit('OA-ENGINE routeForApproval', {
+      recordType, recordId, subsidiaryId,
+      use_amount: !!settings.use_amount,
+      amount, hierarchyId, matchedThresholdId,
+      approver1, approver2, approverCount,
+      defaultApprover1: settings.default_approver1,
+      defaultApprover2: settings.default_approver2
+    });
 
     return { approver1, approver2, hierarchyId, approverCount, settings };
   }
@@ -352,15 +368,22 @@ define([
       const rec = record.create({ type: C.RECORDS.LOG, isDynamic: false });
       rec.setValue({ fieldId: C.FIELDS.LOG.TRANSACTION, value: p.transactionId });
       rec.setValue({ fieldId: C.FIELDS.LOG.ACTION,      value: p.action });
-      rec.setValue({ fieldId: C.FIELDS.LOG.ACTOR,       value: p.actorId });
+      // actor is mandatory in SDF + employee SELECT — only set if it's a valid (positive) employee ID.
+      // System users like -5 (admin) are not valid employee records and would cause save() to throw.
+      const actorIdNum = parseInt(p.actorId, 10);
+      if (actorIdNum > 0) {
+        rec.setValue({ fieldId: C.FIELDS.LOG.ACTOR, value: actorIdNum });
+      }
       rec.setValue({ fieldId: C.FIELDS.LOG.STEP,        value: p.step || 1 });
       rec.setValue({ fieldId: C.FIELDS.LOG.SOURCE,      value: p.source || C.LOG_SOURCES.NETSUITE });
       if (p.targetId) rec.setValue({ fieldId: C.FIELDS.LOG.TARGET,   value: p.targetId });
       if (p.comment)  rec.setValue({ fieldId: C.FIELDS.LOG.COMMENT,  value: p.comment });
       rec.setValue({ fieldId: C.FIELDS.LOG.TIMESTAMP, value: new Date() });
-      return rec.save();
+      const id = rec.save({ ignoreMandatoryFields: true });
+      log.audit('OA-ENGINE createAuditLog ok', { logId: id, transactionId: p.transactionId, action: p.action, actorId: actorIdNum });
+      return id;
     } catch (e) {
-      log.error('OA: Audit log save failed', e.message);
+      log.error('OA: Audit log save failed', { error: e.message, params: p });
       return null;
     }
   }

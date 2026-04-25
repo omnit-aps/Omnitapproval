@@ -145,25 +145,31 @@
     reindex(p);
   };
 
-  // Validate before save: block submit if any matrix row is missing Approver 1.
+  // Validate before save: when use_amount is ON, block submit if any visible matrix row is missing Approver 1.
   // Also reindex so server-side row indices line up with the visible order.
   window.syncRowCount = function () {
-    var errors = [];
-    ['po', 'vb'].forEach(function (p) {
-      var enabledInput = document.querySelector('[name="oa_enable_' + p + '"]');
-      if (!enabledInput || enabledInput.value !== 'T') return;
-      var rows = document.querySelectorAll('#' + p + '-matrix-body tr');
-      rows.forEach(function (tr, i) {
-        var apr1 = tr.querySelector('select[name$="_approver1"]');
-        if (!apr1 || !apr1.value) {
-          errors.push((p === 'po' ? 'Purchase Order' : 'Vendor Bill') + ' matrix row ' + (i + 1) + ': Approver 1 is required');
-        }
+    var useAmountInput = document.querySelector('[name="oa_use_amount"]');
+    var useAmount = useAmountInput && useAmountInput.value === 'T';
+
+    if (useAmount) {
+      var errors = [];
+      ['po', 'vb'].forEach(function (p) {
+        var enabledInput = document.querySelector('[name="oa_enable_' + p + '"]');
+        if (!enabledInput || enabledInput.value !== 'T') return;
+        var rows = document.querySelectorAll('#' + p + '-matrix-body tr');
+        rows.forEach(function (tr, i) {
+          var apr1 = tr.querySelector('select[name$="_approver1"]');
+          if (!apr1 || !apr1.value) {
+            errors.push((p === 'po' ? 'Purchase Order' : 'Vendor Bill') + ' matrix row ' + (i + 1) + ': Approver 1 is required');
+          }
+        });
       });
-    });
-    if (errors.length) {
-      alert('Cannot save:\n\n' + errors.join('\n') + '\n\nSelect Approver 1 or delete the row.');
-      return false;
+      if (errors.length) {
+        alert('Cannot save:\n\n' + errors.join('\n') + '\n\nSelect Approver 1 or delete the row.');
+        return false;
+      }
     }
+
     reindex('po');
     reindex('vb');
     return true;

@@ -19,86 +19,43 @@ define([
   // No business logic — only a breadcrumb so we can confirm in the Script
   // Execution Log that the deployment is actually bound to the record type.
 
+  // beforeSubmit does the field writeback (approvalstatus + nextapprover + custbody fields)
+  // BEFORE NetSuite's native APPROVALROUTING feature locks the nextapprover field.
+  // afterSubmit doing record.load + setValue + save cannot persist nextapprover when
+  // APPROVALROUTING is enabled — the writes are silently dropped.
+
   function beforeSubmit(context) {
-    // Persistent breadcrumb to customrecord_oa_log — queryable via SuiteQL/REST
-    // so we can confirm UE script execution independent of NS Script Execution Log.
-    try {
-      const r = record.create({ type: C.RECORDS.LOG });
-      r.setValue({ fieldId: C.FIELDS.LOG.ACTION, value: 'UE_FIRED_BEFORE' });
-      r.setValue({ fieldId: C.FIELDS.LOG.ACTOR,  value: runtime.getCurrentUser().id });
-      r.setValue({ fieldId: C.FIELDS.LOG.SOURCE, value: 'UE_BREADCRUMB:' + (runtime.executionContext || '?') + ':' + (context.type || '?') });
-      const rec0 = context.newRecord;
-      if (rec0 && rec0.id) r.setValue({ fieldId: C.FIELDS.LOG.TRANSACTION, value: rec0.id });
-      r.save({ ignoreMandatoryFields: true });
-    } catch (e) {
-      log.error('OA-UE-BEFORE breadcrumb write failed', e.message);
-    }
+    log.audit('OA-UE-PROOF BEFORE',
+      'I AM RUNNING ctx=' + (context && context.type ? context.type : 'unknown') +
+      ' id=' + (context && context.newRecord && context.newRecord.id ? context.newRecord.id : 'NEW') +
+      ' execCtx=' + (runtime.executionContext || '?'));
+    log.audit('OA-UE-BEFORE fired', 'entry');
 
-    log.audit('OA-UE-BEFORE fired', 'entry');  // bulletproof first-line — no property access
-
-    try {
-      const rec  = context.newRecord;
-      const user = runtime.getCurrentUser();
-      log.audit('OA-UE-BEFORE detail', {
-        type:        context.type,
-        recordType:  rec && rec.type,
-        recordId:    rec && rec.id,
-        role:        user && user.role,
-        userId:      user && user.id,
-        execContext: runtime.executionContext
-      });
-    } catch (e) {
-      log.error('OA-UE-BEFORE detail failed', e.message);
-    }
-  }
-
-  // ─── afterSubmit ─────────────────────────────────────────────────────────────
-
-  function afterSubmit(context) {
-    // Persistent breadcrumb to customrecord_oa_log — queryable via SuiteQL/REST
-    // so we can confirm UE script execution independent of NS Script Execution Log.
-    try {
-      const r = record.create({ type: C.RECORDS.LOG });
-      r.setValue({ fieldId: C.FIELDS.LOG.ACTION, value: 'UE_FIRED_AFTER' });
-      r.setValue({ fieldId: C.FIELDS.LOG.ACTOR,  value: runtime.getCurrentUser().id });
-      r.setValue({ fieldId: C.FIELDS.LOG.SOURCE, value: 'UE_BREADCRUMB:' + (runtime.executionContext || '?') + ':' + (context.type || '?') });
-      const rec0 = context.newRecord;
-      if (rec0 && rec0.id) r.setValue({ fieldId: C.FIELDS.LOG.TRANSACTION, value: rec0.id });
-      r.save({ ignoreMandatoryFields: true });
-    } catch (e) {
-      log.error('OA-UE-AFTER breadcrumb write failed', e.message);
-    }
-
-    log.audit('OA-UE-AFTER fired', 'entry');  // bulletproof first-line — no property access
-
-    let rec, recordType, recordId, execContext, user;
+    let rec, recordType, recordId, execContext;
     try {
       rec         = context.newRecord;
       recordType  = rec && rec.type;
       recordId    = rec && rec.id;
       execContext = runtime.executionContext;
-      user        = runtime.getCurrentUser();
-      log.audit('OA-UE-AFTER detail', {
+      log.audit('OA-UE-BEFORE detail', {
         type:        context.type,
         recordType,
         recordId,
-        role:        user && user.role,
-        userId:      user && user.id,
+        userId:      runtime.getCurrentUser().id,
+        role:        runtime.getCurrentUser().role,
         execContext
       });
     } catch (e) {
-      log.error('OA-UE-AFTER detail failed', e.message);
+      log.error('OA-UE-BEFORE detail failed', e.message);
       return;
     }
 
     const TRIGGER = context.UserEventType;
     if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
-      log.audit('OA-UE skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
+      log.audit('OA-UE-BEFORE skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
       return;
     }
 
-    // Allow human-driven and integration-driven creates (UI, SOAP, Restlets, REST Web Services).
-    // Exclude background contexts (CSV, scheduled, map/reduce, workflow, mass update) so bulk loads don't auto-route.
     const allowed = [
       runtime.ContextType.USER_INTERFACE,
       runtime.ContextType.WEBSERVICES,
@@ -106,18 +63,9 @@ define([
       runtime.ContextType.RESTWEBSERVICES
     ];
     if (!allowed.includes(execContext)) {
-      log.audit('OA-UE skip', { reason: 'execContext not in allowed list', execContext, recordId });
+      log.audit('OA-UE-BEFORE skip', { reason: 'execContext not in allowed list', execContext, recordId });
       return;
     }
-
-    // ── Status guard ─────────────────────────────────────────────────────────
-    // CREATE: always route. NetSuite defaults approvalstatus=2 (Approved) on
-    //   new transactions when no native approval workflow is configured —
-    //   that "Approved" is just a default, not a real prior approval.
-    // EDIT:   skip ONLY if this transaction already has OA audit log entries.
-    //   No OA history → was never routed by OA → eligible, route as if CREATE.
-    //   Has OA history → already managed by OA, skip.
-    const currentStatus = rec.getValue('approvalstatus');
 
     if (context.type === TRIGGER.EDIT) {
       let hasOaHistory = false;
@@ -128,49 +76,105 @@ define([
           columns: ['internalid']
         }).run().each(() => { hasOaHistory = true; return false; });
       } catch (e) {
-        log.error('OA-UE: OA log history check failed', e.message);
+        log.error('OA-UE-BEFORE: OA log history check failed', e.message);
       }
       if (hasOaHistory) {
-        log.audit('OA-UE skip', { reason: 'EDIT on record with existing OA history', recordId, currentStatus });
+        log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on record with existing OA history', recordId });
         return;
       }
-      log.audit('OA-UE: EDIT on unrouted record — routing as if CREATE', { recordId, currentStatus });
     }
 
-    const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
+    const subsidiaryId = rec.getValue('subsidiary');
     if (!subsidiaryId) {
-      log.audit('OA-UE skip', { reason: 'no subsidiary on record', recordId, recordType });
+      log.audit('OA-UE-BEFORE skip', { reason: 'no subsidiary on record', recordId, recordType });
       return;
     }
 
-    const result = engine.routeForApproval(recordType, recordId, subsidiaryId);
+    // Read amount directly from the record being submitted (recordId may be null on CREATE)
+    const amount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+
+    const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
-      log.audit('OA-UE skip', { reason: 'routeForApproval error', recordId, error: result.error });
+      log.audit('OA-UE-BEFORE skip', { reason: 'routeForApproval error', recordId, error: result.error });
       return;
     }
-    log.audit('OA-UE routing', { recordId, approver1: result.approver1, hierarchyId: result.hierarchyId });
-
     const { approver1, hierarchyId } = result;
-
     if (!approver1) {
-      log.audit('OA-UE skip', { reason: 'no approver resolved by routeForApproval', recordId, recordType });
+      log.audit('OA-UE-BEFORE skip', { reason: 'no approver resolved by routeForApproval', recordId, recordType });
       return;
     }
 
-    let txn;
+    // Write fields on context.newRecord — NetSuite persists these in its own save cycle,
+    // which avoids the APPROVALROUTING lock that drops afterSubmit writes to nextapprover.
+    rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
+    try { rec.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', recordType); }
+    try { rec.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: runtime.getCurrentUser().id }); } catch (e) {}
+    try { if (hierarchyId) rec.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId }); } catch (e) {}
+
+    log.audit('OA-UE-BEFORE writeback set', { recordId, recordType, approver1, hierarchyId, amount });
+  }
+
+  // ─── afterSubmit ─────────────────────────────────────────────────────────────
+
+  // afterSubmit handles bookkeeping that needs the saved recordId:
+  // - audit log row in customrecord_oa_log
+  // - schedule MR notification job
+  // The actual field writeback (nextapprover etc.) happens in beforeSubmit.
+
+  function afterSubmit(context) {
+    log.audit('OA-UE-PROOF AFTER',
+      'I AM RUNNING ctx=' + (context && context.type ? context.type : 'unknown') +
+      ' id=' + (context && context.newRecord && context.newRecord.id ? context.newRecord.id : 'NEW') +
+      ' execCtx=' + (runtime.executionContext || '?'));
+    log.audit('OA-UE-AFTER fired', 'entry');
+
+    let rec, recordType, recordId, execContext;
     try {
-      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+      rec         = context.newRecord;
+      recordType  = rec && rec.type;
+      recordId    = rec && rec.id;
+      execContext = runtime.executionContext;
+      log.audit('OA-UE-AFTER detail', {
+        type:        context.type,
+        recordType,
+        recordId,
+        userId:      runtime.getCurrentUser().id,
+        role:        runtime.getCurrentUser().role,
+        execContext
+      });
     } catch (e) {
-      log.error('OA: record.load failed in afterSubmit', e.message);
+      log.error('OA-UE-AFTER detail failed', e.message);
       return;
     }
 
-    txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
-    try { txn.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', recordType); }
-    // custbody fields may not exist on all record types — best-effort writes
-    try { txn.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: runtime.getCurrentUser().id }); } catch (e) {}
-    try { if (hierarchyId) txn.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId }); } catch (e) {}
-    txn.save({ ignoreMandatoryFields: true });
+    const TRIGGER = context.UserEventType;
+    if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
+      log.audit('OA-UE-AFTER skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
+      return;
+    }
+
+    const allowed = [
+      runtime.ContextType.USER_INTERFACE,
+      runtime.ContextType.WEBSERVICES,
+      runtime.ContextType.RESTLET,
+      runtime.ContextType.RESTWEBSERVICES
+    ];
+    if (!allowed.includes(execContext)) {
+      log.audit('OA-UE-AFTER skip', { reason: 'execContext not in allowed list', execContext, recordId });
+      return;
+    }
+
+    // The saved record carries the writes from beforeSubmit. If nextapprover is set,
+    // we know beforeSubmit successfully routed and we should create the audit log + schedule MR.
+    // If not, beforeSubmit either skipped (already routed, no settings, etc.) or the writeback
+    // was somehow blocked — either way nothing to do here.
+    const nextApprover = rec.getValue('nextapprover');
+    if (!nextApprover) {
+      log.audit('OA-UE-AFTER skip', { reason: 'no nextapprover on record (beforeSubmit did not route)', recordId, recordType });
+      return;
+    }
+
+    log.audit('OA-UE-AFTER bookkeeping', { recordId, recordType, nextApprover });
 
     engine.createAuditLog({
       transactionId: recordId,
