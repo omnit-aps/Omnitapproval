@@ -80,7 +80,11 @@ define([
     }
 
     if (action === 'approve') {
-      engine.processApproval(recordId, recordType, approverId, C.LOG_SOURCES.EMAIL);
+      const result = engine.processApproval(recordId, recordType, approverId, C.LOG_SOURCES.EMAIL);
+      if (!result || !result.success) {
+        resp.write(_errorPage((result && result.message) || 'Approval could not be processed.'));
+        return;
+      }
       resp.write(tpl.buildConfirmationPage('approve'));
       return;
     }
@@ -131,7 +135,11 @@ define([
         return;
       }
 
-      engine.processDecline(payload.rid, payload.rt, payload.aid, comment, C.LOG_SOURCES.EMAIL);
+      const result = engine.processDecline(payload.rid, payload.rt, payload.aid, comment, C.LOG_SOURCES.EMAIL);
+      if (!result || !result.success) {
+        resp.write(_errorPage((result && result.message) || 'Rejection could not be processed.'));
+        return;
+      }
       resp.write(tpl.buildConfirmationPage('decline'));
       return;
     }
