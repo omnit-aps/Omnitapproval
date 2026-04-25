@@ -68,17 +68,22 @@ define([
         id:          r.id,
         name:        r.getValue(C.FIELDS.HIERARCHY.NAME),
         recordType:  r.getValue(C.FIELDS.HIERARCHY.RECORD_TYPE),
-        highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)
+        highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY),
+        priority:    parseInt(r.getValue(C.FIELDS.HIERARCHY.PRIORITY), 10) || 10
       });
       return true;
     });
 
     if (!hierarchies.length) return null;
-    // Specific record type (PO/VB) beats BOTH; within same specificity lowest id wins.
+    // Sort: lowest priority number wins (1 = highest priority, default 10).
+    // Tie-break 1: specific record type (PO/VB) beats BOTH.
+    // Tie-break 2: lowest internal id (oldest record) for full determinism.
     hierarchies.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
       const aGeneral = a.recordType === C.HIERARCHY_RECORD_TYPES.BOTH ? 1 : 0;
       const bGeneral = b.recordType === C.HIERARCHY_RECORD_TYPES.BOTH ? 1 : 0;
-      return aGeneral !== bGeneral ? aGeneral - bGeneral : a.id - b.id;
+      if (aGeneral !== bGeneral) return aGeneral - bGeneral;
+      return a.id - b.id;
     });
     const h = hierarchies[0];
 

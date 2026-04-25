@@ -4,9 +4,10 @@
  * @NModuleScope SameAccount
  */
 define([
+  'N/runtime',
   'N/search',
   './lib/oa_constants'
-], (search, C) => {
+], (runtime, search, C) => {
   'use strict';
 
   const ACTION_LABELS = {
@@ -48,11 +49,48 @@ define([
       return;
     }
 
+    // Access guard: only next approver, a past actor in the log, or a manager may view
+    const userId = runtime.getCurrentUser().id;
+    if (!_canViewHistory(recordId, recordType, userId)) {
+      resp.write(_errorPage('You do not have permission to view this approval history.'));
+      return;
+    }
+
     try {
       resp.write(_render(recordId, recordType));
     } catch (e) {
       resp.write(_errorPage(e.message));
     }
+  }
+
+  function _canViewHistory(recordId, recordType, userId) {
+    // Managers can always view
+    try {
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER] });
+      if (emp[C.FIELDS.EMPLOYEE.IS_MANAGER]) return true;
+    } catch (e) { /* no employee record */ }
+
+    // Current next approver can view
+    try {
+      const txn = search.lookupFields({ type: recordType, id: recordId, columns: ['nextapprover'] });
+      const nextApprover = txn.nextapprover && txn.nextapprover[0] ? txn.nextapprover[0].value : null;
+      if (nextApprover && String(nextApprover) === String(userId)) return true;
+    } catch (e) { /* graceful */ }
+
+    // Past actor in the audit log can view (submitter, previous approver, etc.)
+    let wasActor = false;
+    try {
+      search.create({
+        type:    C.RECORDS.LOG,
+        filters: [
+          [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
+          'AND',
+          [C.FIELDS.LOG.ACTOR, 'anyof', [userId]]
+        ],
+        columns: ['internalid']
+      }).run().getRange({ start: 0, end: 1 }).forEach(() => { wasActor = true; });
+    } catch (e) { /* graceful */ }
+    return wasActor;
   }
 
   function _render(recordId, recordType) {

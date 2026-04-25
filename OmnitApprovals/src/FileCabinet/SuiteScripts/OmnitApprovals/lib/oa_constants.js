@@ -39,7 +39,8 @@ define([], () => {
         STATUS:       'custrecord_oah_status',
         START_DATE:   'custrecord_oah_start_date',
         END_DATE:     'custrecord_oah_end_date',
-        HIGHEST_ONLY: 'custrecord_oah_highest_only'
+        HIGHEST_ONLY: 'custrecord_oah_highest_only',
+        PRIORITY:     'custrecord_oah_priority'
       },
       THRESHOLD: {
         HIERARCHY:  'custrecord_oat_hierarchy',

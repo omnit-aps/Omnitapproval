@@ -145,7 +145,11 @@ define([
       });
 
       // Stateless HMAC token — no storage needed on the transaction record
-      const hmacToken  = utils.generateHmacToken(recordType, recordId, step, approverId, expiryDays);
+      const hmacToken = utils.generateHmacToken(recordType, recordId, step, approverId, expiryDays);
+      if (!hmacToken) {
+        log.error('OA MR: skipping email — HMAC secret not configured', { recordId, recordType, approverId });
+        return;
+      }
       const approveUrl = `${slUrl}?oa_action=approve&oa_token=${encodeURIComponent(hmacToken)}`;
       const declineUrl = `${slUrl}?oa_action=decline&oa_token=${encodeURIComponent(hmacToken)}`;
 

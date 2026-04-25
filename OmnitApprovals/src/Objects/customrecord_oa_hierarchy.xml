@@ -50,5 +50,11 @@
       <ismandatory>F</ismandatory>
       <defaultchecked>F</defaultchecked>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oah_priority">
+      <label>Priority</label>
+      <fieldtype>INTEGER</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultvalue>10</defaultvalue>
+    </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>
