@@ -5,6 +5,15 @@
 > ⚠️ Partial — works but has a noted limitation or manual step
 > ❌ Gap — not handled, needs work or a workaround
 
+> **Field model (post-BUG-1 refactor, commit fd8ff6a):** OmnitApprovals
+> uses NetSuite's **native** approval fields — `approvalstatus` and
+> `nextapprover` — on every transaction. There are no `custbody_oa_*`
+> approver/step/token fields on the transaction record. Step is derived
+> at runtime by counting APPROVED entries in `customrecord_oa_log`.
+> Email approval tokens are **stateless HMACs** (not stored on the
+> record); validity is checked by re-verifying that the live
+> `nextapprover` still matches the approver ID encoded in the token.
+
 ---
 
 ## 1. Setup & Configuration
@@ -49,7 +58,7 @@
 
 ### UAT-006 — PO created routes to correct approver
 **Steps:** Create a PO for a subsidiary with single-step PO approval enabled. Save.
-**Expected:** `approvalstatus` = Pending. `custbody_oa_approver1` = correct approver. `custbody_oa_current_step` = 1. Approver receives notification email.
+**Expected:** `approvalstatus` = Pending. Native `nextapprover` = correct approver (step is derived at runtime from the audit log — 0 APPROVED entries = step 1). Approver receives notification email.
 **Coverage:** ✅
 
 ---
@@ -79,7 +88,7 @@
 
 ### UAT-010 — Step 1 approval advances to step 2
 **Steps:** Two-step approval configured. Approver 1 approves.
-**Expected:** `custbody_oa_current_step` = 2. `approvalstatus` remains Pending. New notification sent to Approver 2.
+**Expected:** Audit log gains an APPROVED entry at step 1 (so derived step is now 2). `approvalstatus` remains Pending. `nextapprover` is updated to Approver 2. New notification sent to Approver 2.
 **Coverage:** ✅
 
 ---
@@ -110,28 +119,28 @@
 
 ### UAT-014 — Amount matches a threshold row → correct approver assigned
 **Steps:** Matrix has row: min 0, Approver = Alice. Create PO for amount 5,000 (base currency).
-**Expected:** `custbody_oa_approver1` = Alice.
+**Expected:** `nextapprover` = Alice.
 **Coverage:** ✅
 
 ---
 
 ### UAT-015 — Amount falls in a gap between rows → default approver used
 **Steps:** Matrix has rows for 0–1,000 (Alice) and 5,000+ (Bob). Create PO for 2,500.
-**Expected:** No threshold matches. `custbody_oa_approver1` = settings default approver. Audit log shows routing.
+**Expected:** No threshold matches. `nextapprover` = settings default approver. Audit log shows routing.
 **Coverage:** ✅
 
 ---
 
 ### UAT-016 — Amount below all thresholds → default approver used
 **Steps:** Only threshold is min 10,000 (Alice). Create PO for 500.
-**Expected:** `custbody_oa_approver1` = default approver (not Alice).
+**Expected:** `nextapprover` = default approver (not Alice).
 **Coverage:** ✅
 
 ---
 
 ### UAT-017 — Two overlapping threshold rows → top row (priority 1) wins
 **Steps:** Row 1 (priority 1): 0–50,000 → Alice. Row 2 (priority 2): 0–50,000 → Bob. Create PO for 10,000.
-**Expected:** `custbody_oa_approver1` = Alice (row 1 takes precedence).
+**Expected:** `nextapprover` = Alice (row 1 takes precedence).
 **Coverage:** ✅
 
 ---
@@ -190,7 +199,7 @@
 
 ### UAT-025 — Already-used token is rejected
 **Steps:** Approve via email link. Copy the same link and open it again.
-**Expected:** Error page: "Invalid or already used token." (Token was replaced on approval.)
+**Expected:** Error page: "This link is no longer valid — the assigned approver has changed. Please log in to NetSuite." (Tokens are stateless HMACs — they are not stored. Re-use is detected because the live `nextapprover` field on the transaction no longer matches the approver ID embedded in the token after the first approval has advanced or completed the flow.)
 **Coverage:** ✅
 
 ---
@@ -214,7 +223,7 @@
 ### UAT-028 — Approver delegates to a flagged approver
 **Prerequisites:** Actor has `custentity_oa_can_delegate = T`. Target has `custentity_oa_is_approver = T`.
 **Steps:** Current approver clicks Delegate button → selects target employee → confirms.
-**Expected:** `custbody_oa_approver1` (or 2) updated to target. New token generated. Target receives notification email. Audit log shows Delegated action with actor → target.
+**Expected:** `nextapprover` updated to target. New HMAC token generated for the target's email link. Target receives notification email. Audit log shows DELEGATED action with actor → target.
 **Coverage:** ✅
 
 ---
@@ -245,7 +254,7 @@
 ### UAT-032 — Approver has delegate_to set → auto-routes on submission
 **Prerequisites:** Approver Alice has `custentity_oa_delegate_to` = Bob.
 **Steps:** Create a PO that would route to Alice.
-**Expected:** `custbody_oa_approver1` is set to Bob (auto-delegation at routing time). Alice is bypassed.
+**Expected:** `nextapprover` is set to Bob (auto-delegation at routing time). Alice is bypassed.
 **Coverage:** ✅
 
 ---
@@ -255,14 +264,14 @@
 ### UAT-033 — Manager resets approval flow
 **Prerequisites:** User has `custentity_oa_is_manager = T`.
 **Steps:** Manager opens a pending PO → clicks Reset flow → selects new approver.
-**Expected:** `custbody_oa_current_step` = 1. `custbody_oa_approver1` = new approver. New token generated. New approver receives notification. Audit log shows Reset action.
+**Expected:** `approvalstatus` = Pending. `nextapprover` = new approver. New HMAC token generated. New approver receives notification. Audit log shows RESET action with step = 1 (flow restart).
 **Coverage:** ✅
 
 ---
 
 ### UAT-034 — Reset invalidates previous email links
 **Steps:** Manager resets flow. Previous approver tries to click the original email approve link.
-**Expected:** Error page: "Invalid or already used token." Previous link is dead.
+**Expected:** Error page: "This link is no longer valid." (The live `nextapprover` no longer matches the approver ID in the original HMAC token after the manager reset, so the email Suitelet rejects it.)
 **Coverage:** ✅
 
 ---
@@ -315,14 +324,14 @@
 ## 9. Approval History
 
 ### UAT-041 — Approval history button appears on submitted PO
-**Steps:** Open a PO that has been submitted for approval (`custbody_oa_submitted_by` is set).
+**Steps:** Open a PO that has been submitted for approval (it has at least one entry in `customrecord_oa_log`).
 **Expected:** "Approval history" button visible in the toolbar, regardless of current approval status.
 **Coverage:** ✅
 
 ---
 
 ### UAT-042 — History button does NOT appear on unsubmitted PO
-**Steps:** Open a newly created PO that has not yet gone through OA (`submitted_by` is empty).
+**Steps:** Open a newly created PO that has not yet gone through OA (no entries in `customrecord_oa_log` for this transaction).
 **Expected:** No "Approval history" button in toolbar.
 **Coverage:** ✅
 
@@ -466,8 +475,8 @@
 ### UAT-061 — is_approver flag required to appear in matrix dropdowns
 **Steps:** Employee A has `is_approver = F`. Open settings → approval matrix.
 **Expected:** Employee A does not appear in the approver dropdowns.
-**Coverage:** ⚠️
-**Note:** The employee dropdown in the matrix currently filters only by `isinactive = F`. The `is_approver` flag is not used to filter matrix dropdowns — any active employee can be selected. The flag is enforced at delegation time, not at matrix setup time. Consider adding the filter to the employee search in `oa_sl_settings.js` if you want to restrict the dropdowns.
+**Coverage:** ✅
+**Note:** Matrix approver dropdowns are filtered by `isinactive = F AND custentity_oa_is_approver = T` (server-side and in the client-side template used for newly added rows). Default approver dropdowns at the top of the form still show all active employees so that an admin can also be set as default approver if needed.
 
 ---
 
@@ -548,7 +557,7 @@
 
 ### UAT-072 — Two-step configured but no approver 2 in matrix or default
 **Steps:** Settings: approver count = 2. Matrix row has no approver2. No default approver2 set.
-**Expected:** `custbody_oa_approver2` is empty. Step 1 approval completes the flow (engine finds approver2 is null and finalises).
+**Expected:** No approver 2 is resolved. The first approval finalises the transaction (the engine re-runs `routeForApproval` at step-1 approval time, finds `approver2 === null`, and short-circuits to APPROVED).
 **Coverage:** ✅
 
 ---
