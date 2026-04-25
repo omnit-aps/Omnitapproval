@@ -20,6 +20,20 @@ define([
   // Execution Log that the deployment is actually bound to the record type.
 
   function beforeSubmit(context) {
+    // Persistent breadcrumb to customrecord_oa_log — queryable via SuiteQL/REST
+    // so we can confirm UE script execution independent of NS Script Execution Log.
+    try {
+      const r = record.create({ type: C.RECORDS.LOG });
+      r.setValue({ fieldId: C.FIELDS.LOG.ACTION, value: 'UE_FIRED_BEFORE' });
+      r.setValue({ fieldId: C.FIELDS.LOG.ACTOR,  value: runtime.getCurrentUser().id });
+      r.setValue({ fieldId: C.FIELDS.LOG.SOURCE, value: 'UE_BREADCRUMB:' + (runtime.executionContext || '?') + ':' + (context.type || '?') });
+      const rec0 = context.newRecord;
+      if (rec0 && rec0.id) r.setValue({ fieldId: C.FIELDS.LOG.TRANSACTION, value: rec0.id });
+      r.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA-UE-BEFORE breadcrumb write failed', e.message);
+    }
+
     log.audit('OA-UE-BEFORE fired', 'entry');  // bulletproof first-line — no property access
 
     try {
@@ -41,6 +55,20 @@ define([
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
 
   function afterSubmit(context) {
+    // Persistent breadcrumb to customrecord_oa_log — queryable via SuiteQL/REST
+    // so we can confirm UE script execution independent of NS Script Execution Log.
+    try {
+      const r = record.create({ type: C.RECORDS.LOG });
+      r.setValue({ fieldId: C.FIELDS.LOG.ACTION, value: 'UE_FIRED_AFTER' });
+      r.setValue({ fieldId: C.FIELDS.LOG.ACTOR,  value: runtime.getCurrentUser().id });
+      r.setValue({ fieldId: C.FIELDS.LOG.SOURCE, value: 'UE_BREADCRUMB:' + (runtime.executionContext || '?') + ':' + (context.type || '?') });
+      const rec0 = context.newRecord;
+      if (rec0 && rec0.id) r.setValue({ fieldId: C.FIELDS.LOG.TRANSACTION, value: rec0.id });
+      r.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA-UE-AFTER breadcrumb write failed', e.message);
+    }
+
     log.audit('OA-UE-AFTER fired', 'entry');  // bulletproof first-line — no property access
 
     let rec, recordType, recordId, execContext, user;
