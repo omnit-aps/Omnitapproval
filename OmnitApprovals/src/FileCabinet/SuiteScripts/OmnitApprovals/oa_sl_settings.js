@@ -447,12 +447,12 @@ define([
             <div class="form-group">
               <label>Default approver 1 *</label>
               <span class="field-help">The primary approver used when amount thresholds are off, or when the transaction amount falls in a gap between threshold rules.</span>
-              ${employeeSelect('oa_default_approver1', s.default_approver1)}
+              ${approverSelect('oa_default_approver1', s.default_approver1, false)}
             </div>
             <div class="form-group">
               <label>Default approver 2 <span class="muted">(2-step only)</span></label>
               <span class="field-help">The second approver used as fallback in a two-step flow when no threshold rule matches. Only relevant when "Number of approvers" is 2.</span>
-              ${employeeSelect('oa_default_approver2', s.default_approver2)}
+              ${approverSelect('oa_default_approver2', s.default_approver2, false)}
             </div>
           </div>
         </div>
