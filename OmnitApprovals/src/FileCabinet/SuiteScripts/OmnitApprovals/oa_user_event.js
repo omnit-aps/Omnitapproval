@@ -73,14 +73,29 @@ define([
       return;
     }
 
+    // ── Status guard ─────────────────────────────────────────────────────────
+    // NetSuite defaults approvalstatus to 2 (Approved) on a new transaction
+    // when no native approval workflow is configured. The OLD code bailed on
+    // 'currentStatus === APPROVED' which silently skipped every CREATE — that
+    // was the actual root cause of zero log entries on any transaction.
+    //
+    // Replaced with transition-aware logic:
+    //   CREATE: always route. We override NS's default status=Approved.
+    //   EDIT:   re-route ONLY when the user manually edits a Rejected record
+    //           (oldStatus === REJECTED AND newStatus === REJECTED, i.e. the
+    //           user changed a field but didn't change the approval status).
+    //           Every other EDIT — including the engine's own internal
+    //           save() calls — is skipped, because those always TRANSITION
+    //           the status (PENDING→APPROVED, PENDING→REJECTED,
+    //           Approved-default→PENDING, etc.).
     const currentStatus = rec.getValue('approvalstatus');
-    if (currentStatus === C.APPROVAL_STATUS.APPROVED) {
-      log.debug('OA-UE skip: already approved', { recordId, currentStatus });
-      return;
-    }
-    if (context.type === TRIGGER.EDIT && currentStatus === C.APPROVAL_STATUS.PENDING) {
-      log.debug('OA-UE skip: edit while pending (loop guard)', { recordId });
-      return;
+    if (context.type === TRIGGER.EDIT) {
+      const oldStatus = context.oldRecord ? context.oldRecord.getValue('approvalstatus') : null;
+      const isResubmission = oldStatus === C.APPROVAL_STATUS.REJECTED && currentStatus === C.APPROVAL_STATUS.REJECTED;
+      if (!isResubmission) {
+        log.debug('OA-UE skip: EDIT not a resubmission', { recordId, oldStatus, currentStatus });
+        return;
+      }
     }
 
     const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
