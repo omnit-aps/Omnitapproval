@@ -313,6 +313,38 @@ define([
     return { success: true, message: 'Flow reset with new approver.' };
   }
 
+  // ─── Process Reassign (Manager) ──────────────────────────────────────────────
+  // Like reset but keeps current approval status + step — only swaps the approver.
+
+  function processReassign(recordId, recordType, managerId, newApproverId) {
+    const isManager = utils.lookupEmployeeField(managerId, C.FIELDS.EMPLOYEE.IS_MANAGER);
+    if (!isManager) return { success: false, message: 'Actor is not a manager.' };
+
+    let txn;
+    try {
+      txn = record.load({ type: recordType, id: recordId, isDynamic: false });
+    } catch (e) {
+      return { success: false, message: 'Record not found.' };
+    }
+
+    if (txn.getValue('approvalstatus') !== C.APPROVAL_STATUS.PENDING) {
+      return { success: false, message: 'Transaction is not pending — cannot reassign.' };
+    }
+
+    const step = _countApprovedLogs(recordId) + 1;
+    _setNextApprover(txn, newApproverId);
+    try {
+      txn.save({ ignoreMandatoryFields: true });
+    } catch (e) {
+      log.error('OA: save failed on reassign', `recordId=${recordId}: ${e.message}`);
+      return { success: false, message: 'Save failed: ' + e.message };
+    }
+
+    createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.REASSIGNED, actorId: managerId, targetId: newApproverId, step });
+    _scheduleNotification(recordId, recordType);
+    return { success: true, message: 'Reassigned to new approver.' };
+  }
+
   // ─── Audit Log ───────────────────────────────────────────────────────────────
 
   function createAuditLog(p) {
@@ -368,6 +400,7 @@ define([
     processDecline,
     processDelegation,
     processReset,
+    processReassign,
     createAuditLog
   };
 });

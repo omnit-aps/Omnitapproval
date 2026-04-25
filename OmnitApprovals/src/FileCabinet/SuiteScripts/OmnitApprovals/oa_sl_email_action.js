@@ -159,8 +159,10 @@ define([
         result = engine.processDelegation(recordId, recordType, userId, req.parameters.oa_target);
         break;
       case 'reset':
-      case 'reassign':
         result = engine.processReset(recordId, recordType, userId, req.parameters.oa_new_approver);
+        break;
+      case 'reassign':
+        result = engine.processReassign(recordId, recordType, userId, req.parameters.oa_new_approver);
         break;
       default:
         result = { success: false, message: 'Unknown action.' };

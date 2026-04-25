@@ -70,9 +70,19 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
   }
 
   // ─── Reassign (Manager) ──────────────────────────────────────────────────────
+  // Reassign keeps current approval state — only swaps the assigned approver.
+  // Reset (above) cancels the flow and restarts at step 1.
 
   function OA_reassign(slUrl) {
-    OA_reset(slUrl);
+    const newApprover = prompt('Enter the internal ID of the new approver:');
+    if (!newApprover) return;
+    const rec = currentRecord.get();
+    _post(slUrl, {
+      oa_action:       'reassign',
+      oa_record_id:    rec.id,
+      oa_record_type:  rec.type,
+      oa_new_approver: newApprover
+    });
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
