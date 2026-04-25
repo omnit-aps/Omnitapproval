@@ -15,6 +15,27 @@ define([
 ], (record, runtime, search, task, url, C, utils, engine) => {
   'use strict';
 
+  // ─── beforeSubmit ────────────────────────────────────────────────────────────
+  // No business logic — only a breadcrumb so we can confirm in the Script
+  // Execution Log that the deployment is actually bound to the record type.
+
+  function beforeSubmit(context) {
+    try {
+      const rec  = context.newRecord;
+      const user = runtime.getCurrentUser();
+      log.audit('OA-UE-BEFORE entry', {
+        type:        context.type,
+        recordType:  rec && rec.type,
+        recordId:    rec && rec.id,
+        role:        user && user.role,
+        userId:      user && user.id,
+        execContext: runtime.executionContext
+      });
+    } catch (e) {
+      log.error('OA-UE-BEFORE breadcrumb failed', e.message);
+    }
+  }
+
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
 
   function afterSubmit(context) {
@@ -22,11 +43,14 @@ define([
     const recordType = rec && rec.type;
     const recordId   = rec && rec.id;
     const execContext = runtime.executionContext;
+    const user       = runtime.getCurrentUser();
 
-    log.audit('OA-UE entry', {
+    log.audit('OA-UE-AFTER entry', {
       type:        context.type,
       recordType,
       recordId,
+      role:        user && user.role,
+      userId:      user && user.id,
       execContext
     });
 
@@ -196,5 +220,5 @@ define([
     }
   }
 
-  return { afterSubmit, beforeLoad };
+  return { beforeSubmit, afterSubmit, beforeLoad };
 });
