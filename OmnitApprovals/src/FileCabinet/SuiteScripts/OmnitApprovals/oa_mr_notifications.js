@@ -70,7 +70,7 @@ define([
           'tranid',
           'subsidiary',
           'amount',
-          'currencysymbol'
+          'currency'
         ]
       });
 
@@ -93,14 +93,14 @@ define([
       const subsidiaryName = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].text  : '';
       const documentNumber = fields.tranid;
       const amount         = parseFloat(fields.amount) || 0;
-      const currencySymbol = fields.currencysymbol || '';
+      const currencySymbol = (fields.currency && fields.currency[0] ? fields.currency[0].text : '') || '';
 
       // Determine current step from audit log (0 approved → step 1)
       let approvedCount = 0;
       search.create({
         type:    C.RECORDS.LOG,
         filters: [
-          [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+          [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
           'AND',
           [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED]
         ],
@@ -113,7 +113,7 @@ define([
       search.create({
         type:    C.RECORDS.LOG,
         filters: [
-          [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+          [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
           'AND',
           [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTED]
         ],

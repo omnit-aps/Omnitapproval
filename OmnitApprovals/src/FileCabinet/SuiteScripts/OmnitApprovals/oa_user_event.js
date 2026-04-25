@@ -72,7 +72,7 @@ define([
       try {
         search.create({
           type:    C.RECORDS.LOG,
-          filters: [[C.FIELDS.LOG.TRANSACTION, 'anyof', recordId]],
+          filters: [[C.FIELDS.LOG.TRANSACTION, 'equalto', recordId]],
           columns: ['internalid']
         }).run().each(() => { hasOaHistory = true; return false; });
       } catch (e) {
@@ -234,7 +234,7 @@ define([
     try {
       search.create({
         type:    C.RECORDS.LOG,
-        filters: [[C.FIELDS.LOG.TRANSACTION, 'anyof', rec.id]],
+        filters: [[C.FIELDS.LOG.TRANSACTION, 'equalto', rec.id]],
         columns: ['internalid']
       }).run().getRange({ start: 0, end: 1 }).forEach(() => { hasLog = true; });
     } catch (e) { /* graceful */ }

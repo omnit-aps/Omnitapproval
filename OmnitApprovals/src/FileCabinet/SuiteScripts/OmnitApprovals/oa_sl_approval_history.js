@@ -77,7 +77,7 @@ define([
     const logs = [];
     search.create({
       type:    C.RECORDS.LOG,
-      filters: [[C.FIELDS.LOG.TRANSACTION, 'anyof', recordId]],
+      filters: [[C.FIELDS.LOG.TRANSACTION, 'equalto', recordId]],
       columns: [
         C.FIELDS.LOG.ACTION,
         C.FIELDS.LOG.ACTOR,

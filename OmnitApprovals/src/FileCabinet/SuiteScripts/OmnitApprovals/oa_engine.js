@@ -178,7 +178,7 @@ define([
     search.create({
       type:    C.RECORDS.LOG,
       filters: [
-        [C.FIELDS.LOG.TRANSACTION, 'anyof', recordId],
+        [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
         'AND',
         [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED]
       ],

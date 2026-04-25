@@ -9,8 +9,7 @@
   <customrecordcustomfields>
     <customrecordcustomfield scriptid="custrecord_oal_transaction">
       <label>Transaction</label>
-      <fieldtype>SELECT</fieldtype>
-      <selectrecordtype>-2</selectrecordtype>
+      <fieldtype>INTEGER</fieldtype>
       <ismandatory>T</ismandatory>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oal_action">
