@@ -5,7 +5,7 @@
   <dependencies>
     <features>
       <feature required="true">SUBSIDIARIES</feature>
-      <feature required="true">APPROVALS</feature>
+      <feature required="true">APPROVALROUTING</feature>
     </features>
   </dependencies>
 </manifest>

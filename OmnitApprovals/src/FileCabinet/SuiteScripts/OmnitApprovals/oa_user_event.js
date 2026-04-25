@@ -18,32 +18,59 @@ define([
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
 
   function afterSubmit(context) {
-    const TRIGGER = context.UserEventType;
-    if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) return;
-
+    const rec        = context.newRecord;
+    const recordType = rec && rec.type;
+    const recordId   = rec && rec.id;
     const execContext = runtime.executionContext;
-    if (![
+
+    log.audit('OA-UE entry', {
+      type:        context.type,
+      recordType,
+      recordId,
+      execContext
+    });
+
+    const TRIGGER = context.UserEventType;
+    if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
+      log.debug('OA-UE skip: trigger', context.type);
+      return;
+    }
+
+    // Allow human-driven and integration-driven creates (UI, SOAP, custom Restlets, REST Web Services API).
+    // Exclude background contexts (CSV import, scheduled, map/reduce, workflow, mass update) so bulk loads don't auto-route.
+    const allowed = [
       runtime.ContextType.USER_INTERFACE,
       runtime.ContextType.WEBSERVICES,
-      runtime.ContextType.RESTLETS
-    ].includes(execContext)) return;
-
-    const rec        = context.newRecord;
-    const recordType = rec.type;
-    const recordId   = rec.id;
+      runtime.ContextType.RESTLET,
+      runtime.ContextType.RESTWEBSERVICES
+    ];
+    if (!allowed.includes(execContext)) {
+      log.debug('OA-UE skip: execContext', execContext);
+      return;
+    }
 
     const currentStatus = rec.getValue('approvalstatus');
-    if (currentStatus === C.APPROVAL_STATUS.APPROVED) return;
-    if (context.type === TRIGGER.EDIT && currentStatus === C.APPROVAL_STATUS.PENDING) return;
+    if (currentStatus === C.APPROVAL_STATUS.APPROVED) {
+      log.debug('OA-UE skip: already approved', { recordId, currentStatus });
+      return;
+    }
+    if (context.type === TRIGGER.EDIT && currentStatus === C.APPROVAL_STATUS.PENDING) {
+      log.debug('OA-UE skip: edit while pending (loop guard)', { recordId });
+      return;
+    }
 
     const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
-    if (!subsidiaryId) return;
+    if (!subsidiaryId) {
+      log.debug('OA-UE skip: no subsidiary on record', { recordId, recordType });
+      return;
+    }
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId);
     if (result.error) {
-      log.debug('OA routeForApproval skipped', result.error);
+      log.audit('OA-UE skip: routeForApproval error', { recordId, error: result.error });
       return;
     }
+    log.audit('OA-UE routing', { recordId, approver1: result.approver1, hierarchyId: result.hierarchyId });
 
     const { approver1, hierarchyId } = result;
 
