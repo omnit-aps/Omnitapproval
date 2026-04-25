@@ -5,8 +5,10 @@
 define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, search, encode) => {
   'use strict';
 
-  // Shared secret for stateless HMAC tokens — change per deployment
-  const HMAC_SECRET = 'OA-OMNIT-2025-STATIC-SECRET-v1';
+  // Shared secret for HMAC tokens. Default is the built-in fallback; call
+  // setHmacSecret() at script startup to use the value from the script parameter.
+  let HMAC_SECRET = 'OA-OMNIT-2025-STATIC-SECRET-v1';
+  function setHmacSecret(s) { if (s) HMAC_SECRET = s; }
 
   // ─── HMAC token helpers ───────────────────────────────────────────────────────
 
@@ -106,6 +108,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
   }
 
   return {
+    setHmacSecret,
     generateHmacToken,
     verifyHmacToken,
     getCurrentUserId,

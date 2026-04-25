@@ -19,6 +19,8 @@ define([
   const PARAM_RECORD_ID   = 'custscript_oa_mr_record_id';
   const PARAM_RECORD_TYPE = 'custscript_oa_mr_record_type';
 
+  utils.setHmacSecret(runtime.getCurrentScript().getParameter({ name: 'custscript_oa_mr_hmac_secret' }));
+
   function getInputData(inputContext) {
     const script     = runtime.getCurrentScript();
     const recordId   = script.getParameter({ name: PARAM_RECORD_ID });

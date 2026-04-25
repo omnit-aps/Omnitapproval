@@ -35,7 +35,21 @@ define([
   // ─── Batch POST ───────────────────────────────────────────────────────────────
 
   function handleBatchPost(req, resp) {
-    const userId  = runtime.getCurrentUser().id;
+    const userId = runtime.getCurrentUser().id;
+
+    let isApprover = false, isManager = false;
+    try {
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
+      isApprover = !!emp[C.FIELDS.EMPLOYEE.IS_APPROVER];
+      isManager  = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
+    } catch (e) { /* no employee record */ }
+
+    if (!isApprover && !isManager) {
+      resp.setHeader({ name: 'Content-Type', value: 'application/json' });
+      resp.write(JSON.stringify({ error: 'Access denied. You are not configured as an approver or manager.' }));
+      return;
+    }
+
     const body    = JSON.parse(req.body || '{}');
     const actions = body.actions || [];
 

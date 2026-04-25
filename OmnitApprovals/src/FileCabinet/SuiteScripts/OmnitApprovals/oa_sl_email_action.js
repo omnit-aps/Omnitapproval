@@ -14,6 +14,8 @@ define([
 ], (record, runtime, search, C, utils, tpl, engine) => {
   'use strict';
 
+  utils.setHmacSecret(runtime.getCurrentScript().getParameter({ name: 'custscript_oa_ea_hmac_secret' }));
+
   function onRequest(context) {
     const req  = context.request;
     const resp = context.response;
