@@ -115,11 +115,28 @@ define([
   // ─── beforeLoad ──────────────────────────────────────────────────────────────
 
   function beforeLoad(context) {
-    if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) return;
-    if (runtime.executionContext !== runtime.ContextType.USER_INTERFACE) return;
+    const rec    = context.newRecord;
+    const recordType = rec && rec.type;
+    const recordId   = rec && rec.id;
+    const execContext = runtime.executionContext;
+
+    log.audit('OA-UE beforeLoad entry', {
+      type:        context.type,
+      recordType,
+      recordId,
+      execContext
+    });
+
+    if (context.type !== context.UserEventType.VIEW && context.type !== context.UserEventType.EDIT) {
+      log.debug('OA-UE beforeLoad skip: trigger', context.type);
+      return;
+    }
+    if (execContext !== runtime.ContextType.USER_INTERFACE) {
+      log.debug('OA-UE beforeLoad skip: execContext', execContext);
+      return;
+    }
 
     const form   = context.form;
-    const rec    = context.newRecord;
     const userId = runtime.getCurrentUser().id;
     const status = rec.getValue('approvalstatus');
 
