@@ -28,64 +28,107 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
   // ─── Decline ─────────────────────────────────────────────────────────────────
 
   function OA_decline(slUrl) {
-    _promptComment('Reject transaction', 'Enter reason for rejection (required):')
-      .then(comment => {
-        if (comment === null) return;
-        const rec = currentRecord.get();
-        _post(slUrl, {
-          oa_action:      'decline',
-          oa_record_id:   rec.id,
-          oa_record_type: rec.type,
-          oa_comment:     comment
-        });
+    _inputModal('Reject transaction', 'Enter reason for rejection (required)').then(comment => {
+      if (!comment) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:      'decline',
+        oa_record_id:   rec.id,
+        oa_record_type: rec.type,
+        oa_comment:     comment
       });
+    });
   }
 
   // ─── Delegate ────────────────────────────────────────────────────────────────
 
   function OA_delegate(slUrl) {
-    const targetId = prompt('Enter the internal ID of the employee to delegate to:');
-    if (!targetId) return;
-    const rec = currentRecord.get();
-    _post(slUrl, {
-      oa_action:      'delegate',
-      oa_record_id:   rec.id,
-      oa_record_type: rec.type,
-      oa_target:      targetId
+    _inputModal('Delegate approval', 'Employee internal ID to delegate to').then(targetId => {
+      if (!targetId) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:      'delegate',
+        oa_record_id:   rec.id,
+        oa_record_type: rec.type,
+        oa_target:      targetId
+      });
     });
   }
 
   // ─── Reset (Manager) ─────────────────────────────────────────────────────────
 
   function OA_reset(slUrl) {
-    const newApprover = prompt('Enter the internal ID of the new approver:');
-    if (!newApprover) return;
-    const rec = currentRecord.get();
-    _post(slUrl, {
-      oa_action:       'reset',
-      oa_record_id:    rec.id,
-      oa_record_type:  rec.type,
-      oa_new_approver: newApprover
+    _inputModal('Reset flow', 'Employee internal ID of new approver').then(newApprover => {
+      if (!newApprover) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:       'reset',
+        oa_record_id:    rec.id,
+        oa_record_type:  rec.type,
+        oa_new_approver: newApprover
+      });
     });
   }
 
   // ─── Reassign (Manager) ──────────────────────────────────────────────────────
-  // Reassign keeps current approval state — only swaps the assigned approver.
-  // Reset (above) cancels the flow and restarts at step 1.
 
   function OA_reassign(slUrl) {
-    const newApprover = prompt('Enter the internal ID of the new approver:');
-    if (!newApprover) return;
-    const rec = currentRecord.get();
-    _post(slUrl, {
-      oa_action:       'reassign',
-      oa_record_id:    rec.id,
-      oa_record_type:  rec.type,
-      oa_new_approver: newApprover
+    _inputModal('Reassign approver', 'Employee internal ID of new approver').then(newApprover => {
+      if (!newApprover) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:       'reassign',
+        oa_record_id:    rec.id,
+        oa_record_type:  rec.type,
+        oa_new_approver: newApprover
+      });
     });
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  function _inputModal(title, placeholder) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center';
+
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:10px;padding:28px 24px 20px;min-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.22);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+
+      const h = document.createElement('div');
+      h.style.cssText = 'font-size:16px;font-weight:700;margin-bottom:14px;color:#1a1a1a';
+      h.textContent = title;
+
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = placeholder || '';
+      inp.style.cssText = 'width:100%;padding:9px 12px;border:1.5px solid #ccc;border-radius:6px;font-size:14px;margin-bottom:18px;box-sizing:border-box;outline:none';
+      inp.addEventListener('focus', () => { inp.style.borderColor = '#c74634'; });
+      inp.addEventListener('blur',  () => { inp.style.borderColor = '#ccc'; });
+
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+
+      const cancel = document.createElement('button');
+      cancel.textContent = 'Cancel';
+      cancel.style.cssText = 'padding:8px 18px;border:1.5px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;color:#555';
+
+      const ok = document.createElement('button');
+      ok.textContent = 'OK';
+      ok.style.cssText = 'padding:8px 18px;border:none;border-radius:6px;background:#c74634;color:#fff;cursor:pointer;font-size:14px;font-weight:600';
+
+      const close = val => { document.body.removeChild(overlay); resolve(val); };
+      cancel.addEventListener('click', () => close(null));
+      ok.addEventListener('click',     () => close(inp.value.trim() || null));
+      inp.addEventListener('keydown',  e => { if (e.key === 'Enter') ok.click(); if (e.key === 'Escape') cancel.click(); });
+
+      row.appendChild(cancel); row.appendChild(ok);
+      box.appendChild(h); box.appendChild(inp); box.appendChild(row);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      setTimeout(() => inp.focus(), 50);
+    });
+  }
 
   function _post(slUrl, params) {
     const body = Object.keys(params)
@@ -113,19 +156,6 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
       const msg = result.message || 'An error occurred. Please try again.';
       dialog.alert({ title: 'Error', message: msg });
     }
-  }
-
-  function _promptComment(title, message) {
-    return new Promise(resolve => {
-      const comment = prompt(`${title}\n${message}`);
-      if (comment === null) { resolve(null); return; }
-      if (!comment.trim()) {
-        dialog.alert({ title: 'Required field', message: 'A reason is required.' })
-          .then(() => resolve(null));
-        return;
-      }
-      resolve(comment);
-    });
   }
 
   function OA_history(histUrl, recordId, recordType) {
