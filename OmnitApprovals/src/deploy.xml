@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <deploy>
-  <configuration>
-    <path>~/AccountConfiguration/*</path>
-  </configuration>
   <files>
     <path>~/FileCabinet/SuiteScripts/OmnitApprovals/*</path>
     <path>~/FileCabinet/SuiteScripts/OmnitApprovals/lib/*</path>

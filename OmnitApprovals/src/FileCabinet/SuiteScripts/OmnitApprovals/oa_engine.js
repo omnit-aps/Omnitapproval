@@ -254,6 +254,7 @@ define([
 
     // Final approval (normal or super override)
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
+    _setNextApprover(txn, null);
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -296,6 +297,7 @@ define([
     const step = _countApprovedLogs(recordId) + 1;
 
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.REJECTED });
+    _setNextApprover(txn, null);
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {

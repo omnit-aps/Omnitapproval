@@ -197,14 +197,17 @@ define([
       return;
     }
 
-    // For EDIT: if the nextapprover is unchanged from before the save, beforeSubmit returned
-    // early (threshold not exceeded or no threshold configured) — skip to avoid duplicate
-    // log entries and spurious re-notification emails.
+    // For EDIT: skip if both nextapprover AND approvalstatus are unchanged — means beforeSubmit
+    // did not re-route (threshold not exceeded or no threshold configured). We must check both
+    // because a re-route to the same approver (APPROVED→PENDING) only changes approvalstatus.
     if (context.type === TRIGGER.EDIT) {
-      let oldNextApprover;
+      let oldNextApprover, oldStatus;
       try { oldNextApprover = context.oldRecord.getValue('nextapprover'); } catch (e) { oldNextApprover = null; }
-      if (String(oldNextApprover || '') === String(nextApprover || '')) {
-        log.audit('OA-UE-AFTER skip', { reason: 'EDIT: nextapprover unchanged — beforeSubmit did not re-route', recordId });
+      try { oldStatus       = context.oldRecord.getValue('approvalstatus'); } catch (e) { oldStatus = null; }
+      const nextApproverUnchanged = String(oldNextApprover || '') === String(nextApprover || '');
+      const statusUnchanged       = String(oldStatus || '') === String(rec.getValue('approvalstatus') || '');
+      if (nextApproverUnchanged && statusUnchanged) {
+        log.audit('OA-UE-AFTER skip', { reason: 'EDIT: nextapprover and approvalstatus unchanged — beforeSubmit did not re-route', recordId });
         return;
       }
     }

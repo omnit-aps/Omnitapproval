@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transactionbodycustomfield scriptid="custbody_oa_hierarchy_used">
+  <label>OA Hierarchy Used</label>
+  <fieldtype>INTEGER</fieldtype>
+  <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <appliestopurchaseorder>T</appliestopurchaseorder>
+  <appliestovendorbill>T</appliestovendorbill>
+</transactionbodycustomfield>
