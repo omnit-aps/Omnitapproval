@@ -11,6 +11,12 @@ define([
 ], (runtime, search, url, C) => {
   'use strict';
 
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function render(context) {
     const portlet = context.portlet;
     portlet.title = 'Pending Approvals';
@@ -26,7 +32,7 @@ define([
       const rows = _loadPending(userId);
       portlet.html = rows.length ? _tableHtml(rows, dashUrl) : _emptyHtml(dashUrl);
     } catch (e) {
-      portlet.html = `<p style="color:#888;padding:12px;font-size:13px">Unable to load approvals: ${e.message}</p>`;
+      portlet.html = `<p style="color:#888;padding:12px;font-size:13px">Unable to load approvals: ${_esc(e.message)}</p>`;
     }
   }
 
@@ -63,11 +69,11 @@ define([
     const tableRows = rows.map(r =>
       `<tr>
         <td style="padding:8px 10px">
-          <span style="background:${r.typeBg};color:${r.typeColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${r.typeLabel}</span>
+          <span style="background:${r.typeBg};color:${r.typeColor};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${_esc(r.typeLabel)}</span>
         </td>
-        <td style="padding:8px 10px;font-weight:500;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.entity}</td>
-        <td style="padding:8px 10px;font-family:monospace;font-size:12px;color:#555">${r.tranid}</td>
-        <td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">${r.currency} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td style="padding:8px 10px;font-weight:500;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(r.entity)}</td>
+        <td style="padding:8px 10px;font-family:monospace;font-size:12px;color:#555">${_esc(r.tranid)}</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">${_esc(r.currency)} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
       </tr>`
     ).join('');
 

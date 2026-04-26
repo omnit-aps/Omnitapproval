@@ -27,10 +27,12 @@ define([
     const recordType = script.getParameter({ name: PARAM_RECORD_TYPE });
 
     if (recordId && recordType) {
-      return [{ recordId, recordType }];
+      // Triggered run — notify for a single specific record
+      return [{ recordId, recordType, isSweep: false }];
     }
 
-    // Scheduled sweep — find all pending transactions that have a nextapprover assigned
+    // Scheduled sweep — audit only; emails are NOT sent in sweep mode to prevent
+    // re-notification spam. Email is always sent by the afterSubmit-triggered run.
     const results = [];
     search.create({
       type:    'transaction',
@@ -45,10 +47,12 @@ define([
     }).run().each(r => {
       results.push({
         recordId:   r.id,
-        recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill'
+        recordType: r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill',
+        isSweep:    true
       });
       return true;
     });
+    log.audit('OA MR sweep', `Found ${results.length} pending transaction(s) without completion.`);
     return results;
   }
 
@@ -61,6 +65,13 @@ define([
     const item       = JSON.parse(reduceContext.values[0]);
     const recordId   = item.recordId;
     const recordType = item.recordType;
+    const isSweep    = !!item.isSweep;
+
+    // Sweep runs are audit-only — no emails to prevent re-notification spam
+    if (isSweep) {
+      log.audit('OA MR sweep pending', { recordId, recordType });
+      return;
+    }
 
     try {
       const fields = search.lookupFields({
@@ -197,11 +208,15 @@ define([
     if (summary.inputSummary.error) {
       log.error('OA MR getInputData error', summary.inputSummary.error);
     }
+    let errorCount = 0;
     summary.reduceSummary.errors.iterator().each((key, error) => {
       log.error('OA MR reduce error', `Key: ${key} | ${error}`);
+      errorCount++;
       return true;
     });
-    log.audit('OA MR complete', `Processed ${summary.reduceSummary.keys.iterator().count || 0} records`);
+    let processedCount = 0;
+    summary.reduceSummary.keys.iterator().each(() => { processedCount++; return true; });
+    log.audit('OA MR complete', `Processed ${processedCount} record(s), ${errorCount} error(s)`);
   }
 
   return { getInputData, map, reduce, summarize };

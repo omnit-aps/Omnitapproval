@@ -395,9 +395,8 @@ async function submitAll() {
 
   if (!actions.length) { showToast('No actions selected.'); return; }
 
-  const btn = document.querySelector('.btn-primary');
-  btn.disabled = true;
-  btn.textContent = 'Processing...';
+  const btns = document.querySelectorAll('.btn-primary');
+  btns.forEach(b => { b.disabled = true; b.textContent = 'Processing...'; });
 
   try {
     const res  = await fetch(SELF_URL, {
@@ -406,7 +405,7 @@ async function submitAll() {
       body:    JSON.stringify({ actions })
     });
     const data = await res.json();
-    if (data.error) { showToast('Access denied: ' + data.error); btn.disabled = false; btn.textContent = 'Submit approvals'; return; }
+    if (data.error) { showToast('Access denied: ' + data.error); btns.forEach(b => { b.disabled = false; b.textContent = 'Submit approvals'; }); return; }
     const results = data.results || [];
     const ok   = results.filter(r => r.success).length;
     const fail = results.filter(r => !r.success).length;
@@ -414,8 +413,7 @@ async function submitAll() {
     setTimeout(() => window.location.reload(), 1800);
   } catch (e) {
     showToast('Error during processing. Please try again.');
-    btn.disabled = false;
-    btn.textContent = 'Submit approvals';
+    btns.forEach(b => { b.disabled = false; b.textContent = 'Submit approvals'; });
   }
 }
 

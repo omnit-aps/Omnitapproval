@@ -197,6 +197,18 @@ define([
       return;
     }
 
+    // For EDIT: if the nextapprover is unchanged from before the save, beforeSubmit returned
+    // early (threshold not exceeded or no threshold configured) — skip to avoid duplicate
+    // log entries and spurious re-notification emails.
+    if (context.type === TRIGGER.EDIT) {
+      let oldNextApprover;
+      try { oldNextApprover = context.oldRecord.getValue('nextapprover'); } catch (e) { oldNextApprover = null; }
+      if (String(oldNextApprover || '') === String(nextApprover || '')) {
+        log.audit('OA-UE-AFTER skip', { reason: 'EDIT: nextapprover unchanged — beforeSubmit did not re-route', recordId });
+        return;
+      }
+    }
+
     log.audit('OA-UE-AFTER bookkeeping', { recordId, recordType, nextApprover });
 
     // Determine whether this is an initial submission or a threshold-triggered re-submission
