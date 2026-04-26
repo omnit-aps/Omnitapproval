@@ -72,7 +72,7 @@ define([
         id:          r.id,
         name:        r.getValue(C.FIELDS.HIERARCHY.NAME),
         recordType:  r.getValue(C.FIELDS.HIERARCHY.RECORD_TYPE),
-        highestOnly: r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY),
+        highestOnly: utils.parseBool(r.getValue(C.FIELDS.HIERARCHY.HIGHEST_ONLY)),
         priority:    parseInt(r.getValue(C.FIELDS.HIERARCHY.PRIORITY), 10) || 10
       });
       return true;
@@ -312,8 +312,8 @@ define([
   // ─── Process Delegation ──────────────────────────────────────────────────────
 
   function processDelegation(recordId, recordType, actorId, targetId) {
-    const canDelegate      = utils.lookupEmployeeField(actorId,  C.FIELDS.EMPLOYEE.CAN_DELEGATE);
-    const targetIsApprover = utils.lookupEmployeeField(targetId, C.FIELDS.EMPLOYEE.IS_APPROVER);
+    const canDelegate      = utils.parseBool(utils.lookupEmployeeField(actorId,  C.FIELDS.EMPLOYEE.CAN_DELEGATE));
+    const targetIsApprover = utils.parseBool(utils.lookupEmployeeField(targetId, C.FIELDS.EMPLOYEE.IS_APPROVER));
     if (!canDelegate)      return { success: false, message: 'Actor cannot delegate.' };
     if (!targetIsApprover) return { success: false, message: 'Target is not an approver.' };
 
@@ -349,8 +349,8 @@ define([
   // ─── Process Reset (Manager) ─────────────────────────────────────────────────
 
   function processReset(recordId, recordType, managerId, newApproverId) {
-    const isManager       = utils.lookupEmployeeField(managerId,    C.FIELDS.EMPLOYEE.IS_MANAGER);
-    const targetIsApprover = utils.lookupEmployeeField(newApproverId, C.FIELDS.EMPLOYEE.IS_APPROVER);
+    const isManager        = utils.parseBool(utils.lookupEmployeeField(managerId,      C.FIELDS.EMPLOYEE.IS_MANAGER));
+    const targetIsApprover = utils.parseBool(utils.lookupEmployeeField(newApproverId,  C.FIELDS.EMPLOYEE.IS_APPROVER));
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
@@ -379,8 +379,8 @@ define([
   // Like reset but keeps current approval status + step — only swaps the approver.
 
   function processReassign(recordId, recordType, managerId, newApproverId) {
-    const isManager        = utils.lookupEmployeeField(managerId,    C.FIELDS.EMPLOYEE.IS_MANAGER);
-    const targetIsApprover = utils.lookupEmployeeField(newApproverId, C.FIELDS.EMPLOYEE.IS_APPROVER);
+    const isManager        = utils.parseBool(utils.lookupEmployeeField(managerId,      C.FIELDS.EMPLOYEE.IS_MANAGER));
+    const targetIsApprover = utils.parseBool(utils.lookupEmployeeField(newApproverId,  C.FIELDS.EMPLOYEE.IS_APPROVER));
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
@@ -439,7 +439,7 @@ define([
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   function _isSuperApprover(actorId) {
-    return !!utils.lookupEmployeeField(actorId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER);
+    return utils.parseBool(utils.lookupEmployeeField(actorId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER));
   }
 
   function _setNextApprover(txn, employeeId) {

@@ -65,7 +65,7 @@ define([
     const settings       = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
 
     // For unauthenticated requests check that the subsidiary allows it
-    if (runtime.getCurrentUser().id <= 0 && !(settings && settings.approve_without_login)) {
+    if (runtime.getCurrentUser().id <= 0 && !(settings && utils.parseBool(settings.approve_without_login))) {
       resp.write(_errorPage('Approval without login is not enabled for this subsidiary. Please log in to NetSuite to approve this transaction.'));
       return;
     }

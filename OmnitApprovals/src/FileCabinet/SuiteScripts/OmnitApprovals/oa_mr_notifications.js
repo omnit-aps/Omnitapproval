@@ -95,7 +95,7 @@ define([
       if (!approverId) return;
 
       const useEmail = utils.lookupEmployeeField(approverId, C.FIELDS.EMPLOYEE.USE_EMAIL);
-      if (!useEmail) return;
+      if (!utils.parseBool(useEmail)) return;
 
       const approverLookup = search.lookupFields({ type: 'employee', id: approverId, columns: ['firstname', 'lastname', 'email'] });
       const approverName   = `${approverLookup.firstname || ''} ${approverLookup.lastname || ''}`.trim();
@@ -137,7 +137,7 @@ define([
       });
 
       const settings = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
-      if (!settings || !settings.email_enabled) return;
+      if (!settings || !utils.parseBool(settings.email_enabled)) return;
 
       const approveLabel = settings.approve_string || 'Approve';
       const declineLabel = settings.reject_string  || 'Reject';
@@ -159,20 +159,26 @@ define([
         return;
       }
 
-      const slUrl = url.resolveScript({
-        scriptId:          'customscript_oa_sl_email_action',
-        deploymentId:      'customdeploy_oa_sl_email_action',
-        returnExternalUrl: true
-      });
-
       // Stateless HMAC token — no storage needed on the transaction record
       const hmacToken = utils.generateHmacToken(recordType, recordId, step, approverId, expiryDays);
       if (!hmacToken) {
         log.error('OA MR: skipping email — HMAC secret not configured', { recordId, recordType, approverId });
         return;
       }
-      const approveUrl = `${slUrl}?oa_action=approve&oa_token=${encodeURIComponent(hmacToken)}`;
-      const declineUrl = `${slUrl}?oa_action=decline&oa_token=${encodeURIComponent(hmacToken)}`;
+
+      // Use params in resolveScript so NS appends correctly (URL already contains ?script=&deploy=)
+      const approveUrl = url.resolveScript({
+        scriptId:          'customscript_oa_sl_email_action',
+        deploymentId:      'customdeploy_oa_sl_email_action',
+        returnExternalUrl: true,
+        params:            { oa_action: 'approve', oa_token: hmacToken }
+      });
+      const declineUrl = url.resolveScript({
+        scriptId:          'customscript_oa_sl_email_action',
+        deploymentId:      'customdeploy_oa_sl_email_action',
+        returnExternalUrl: true,
+        params:            { oa_action: 'decline', oa_token: hmacToken }
+      });
 
       const htmlBody = tpl.buildApprovalEmail({
         approverName,

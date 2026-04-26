@@ -4,6 +4,5 @@
   <fieldtype>INTEGER</fieldtype>
   <ismandatory>F</ismandatory>
   <displaytype>HIDDEN</displaytype>
-  <appliestopurchaseorder>T</appliestopurchaseorder>
-  <appliestovendorbill>T</appliestovendorbill>
+  <bodypurchase>T</bodypurchase>
 </transactionbodycustomfield>

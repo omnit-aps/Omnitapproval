@@ -80,29 +80,43 @@ define([
         log.error('OA-UE-BEFORE: OA log history check failed', e.message);
       }
       if (hasOaHistory) {
-        // Check if amount change exceeds the re-submit threshold configured for this subsidiary
-        const subId    = rec.getValue('subsidiary');
-        const settings = subId ? engine.getSettingsForSubsidiary(subId) : null;
-        const pctCfg   = parseFloat(settings && settings.resubmit_threshold_pct) || 0;
-        const absCfg   = parseFloat(settings && settings.resubmit_threshold_abs) || 0;
+        const currentStatus = rec.getValue('approvalstatus');
 
-        if (pctCfg > 0 || absCfg > 0) {
-          const oldAmt  = parseFloat(context.oldRecord.getValue('total') || context.oldRecord.getValue('amount') || 0) || 0;
-          const newAmt  = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
-          const pctChg  = oldAmt > 0 ? Math.abs((newAmt - oldAmt) / oldAmt) * 100 : 0;
-          const absChg  = Math.abs(newAmt - oldAmt);
-          const exceeded = (pctCfg > 0 && pctChg >= pctCfg) || (absCfg > 0 && absChg >= absCfg);
+        if (currentStatus === C.APPROVAL_STATUS.REJECTED) {
+          // UAT rule: REJECTED + edit → always re-route (submitter corrects and resubmits)
+          log.audit('OA-UE-BEFORE re-route', { reason: 'EDIT on REJECTED record — re-routing for re-submission', recordId });
+          // Fall through to routing below
 
-          if (exceeded) {
-            log.audit('OA-UE-BEFORE threshold exceeded — re-routing', { recordId, oldAmt, newAmt, pctChg: pctChg.toFixed(2), absChg });
-            // Fall through to re-run routing below
+        } else if (currentStatus === C.APPROVAL_STATUS.PENDING) {
+          // UAT rule: PENDING + edit → never re-route (already in-flight)
+          log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on PENDING record — in-flight approval, skip re-routing', recordId });
+          return;
+
+        } else {
+          // UAT rule: APPROVED + edit → only re-route if amount change exceeds threshold
+          const subId    = rec.getValue('subsidiary');
+          const settings = subId ? engine.getSettingsForSubsidiary(subId) : null;
+          const pctCfg   = parseFloat(settings && settings.resubmit_threshold_pct) || 0;
+          const absCfg   = parseFloat(settings && settings.resubmit_threshold_abs) || 0;
+
+          if (pctCfg > 0 || absCfg > 0) {
+            const oldAmt   = parseFloat(context.oldRecord.getValue('total') || context.oldRecord.getValue('amount') || 0) || 0;
+            const newAmt   = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+            const pctChg   = oldAmt > 0 ? Math.abs((newAmt - oldAmt) / oldAmt) * 100 : 0;
+            const absChg   = Math.abs(newAmt - oldAmt);
+            const exceeded = (pctCfg > 0 && pctChg >= pctCfg) || (absCfg > 0 && absChg >= absCfg);
+
+            if (exceeded) {
+              log.audit('OA-UE-BEFORE threshold exceeded — re-routing', { recordId, oldAmt, newAmt, pctChg: pctChg.toFixed(2), absChg });
+              // Fall through to routing below
+            } else {
+              log.audit('OA-UE-BEFORE skip', { reason: 'EDIT within threshold', recordId, pctChg: pctChg.toFixed(2), absChg });
+              return;
+            }
           } else {
-            log.audit('OA-UE-BEFORE skip', { reason: 'EDIT within threshold', recordId, pctChg: pctChg.toFixed(2), absChg });
+            log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on APPROVED record, no threshold configured', recordId });
             return;
           }
-        } else {
-          log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on record with OA history, no threshold configured', recordId });
-          return;
         }
       }
     }
@@ -347,9 +361,9 @@ define([
     // nextapprover is the native NetSuite field — works on both PO and VB
     const currentApprover   = rec.getValue('nextapprover');
     const isCurrentApprover = currentApprover && String(currentApprover) === String(userId);
-    const canDelegate       = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE);
-    const isManager         = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER);
-    const isSuperApprover   = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER);
+    const canDelegate       = utils.parseBool(utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE));
+    const isManager         = utils.parseBool(utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER));
+    const isSuperApprover   = utils.parseBool(utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER));
 
     const subsidiaryId = utils.getTransactionSubsidiary(rec.type, rec.id);
     const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;

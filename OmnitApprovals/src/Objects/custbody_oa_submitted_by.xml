@@ -5,6 +5,5 @@
   <selectrecordtype>-4</selectrecordtype>
   <ismandatory>F</ismandatory>
   <displaytype>HIDDEN</displaytype>
-  <appliestopurchaseorder>T</appliestopurchaseorder>
-  <appliestovendorbill>T</appliestovendorbill>
+  <bodypurchase>T</bodypurchase>
 </transactionbodycustomfield>
