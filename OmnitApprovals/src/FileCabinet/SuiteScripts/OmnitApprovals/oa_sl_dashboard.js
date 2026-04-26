@@ -28,8 +28,13 @@ define([
     const typeFilter   = req.parameters.oa_filter_type   || 'all';
     const statusFilter = req.parameters.oa_filter_status || 'pending';
 
+    let isSuperApprover = false;
+    try {
+      isSuperApprover = !!search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] })[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
+    } catch (e) { /* graceful */ }
+
     const rows = loadPendingTransactions(userId, typeFilter, statusFilter);
-    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId));
+    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover));
   }
 
   // ─── Batch POST ───────────────────────────────────────────────────────────────
@@ -37,16 +42,17 @@ define([
   function handleBatchPost(req, resp) {
     const userId = runtime.getCurrentUser().id;
 
-    let isApprover = false, isManager = false;
+    let isApprover = false, isManager = false, isSuperApprover = false;
     try {
-      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
-      isApprover = !!emp[C.FIELDS.EMPLOYEE.IS_APPROVER];
-      isManager  = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
+      isApprover      = !!emp[C.FIELDS.EMPLOYEE.IS_APPROVER];
+      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
+      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
     } catch (e) { /* no employee record */ }
 
-    if (!isApprover && !isManager) {
+    if (!isApprover && !isManager && !isSuperApprover) {
       resp.setHeader({ name: 'Content-Type', value: 'application/json' });
-      resp.write(JSON.stringify({ error: 'Access denied. You are not configured as an approver or manager.' }));
+      resp.write(JSON.stringify({ error: 'Access denied. You are not configured as an approver, manager, or super approver.' }));
       return;
     }
 
@@ -61,6 +67,10 @@ define([
           result = engine.processApproval(a.recordId, a.recordType, userId);
         } else if (a.action === 'decline') {
           result = engine.processDecline(a.recordId, a.recordType, userId, a.comment || 'Rejected via dashboard');
+        } else if (a.action === 'super_approve') {
+          result = engine.processApproval(a.recordId, a.recordType, userId, null, a.comment);
+        } else if (a.action === 'super_decline') {
+          result = engine.processDecline(a.recordId, a.recordType, userId, a.comment, null, true);
         } else if (a.action === 'reassign') {
           if (!a.newApprover) {
             result = { success: false, message: 'New approver ID required for reassign.' };
@@ -83,9 +93,11 @@ define([
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
   function loadPendingTransactions(userId, typeFilter, statusFilter) {
-    let isManager = false;
+    let isManager = false, isSuperApprover = false;
     try {
-      isManager = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER] })[C.FIELDS.EMPLOYEE.IS_MANAGER];
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
+      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
+      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
     } catch (e) { /* user has no employee record — treat as non-manager */ }
 
     const statusMap = { pending: C.APPROVAL_STATUS.PENDING, approved: C.APPROVAL_STATUS.APPROVED, rejected: C.APPROVAL_STATUS.REJECTED };
@@ -100,8 +112,8 @@ define([
       ['approvalstatus', 'anyof', approvalStatuses]
     ];
 
-    // Non-managers see only records where they are the current nextapprover
-    if (!isManager) {
+    // Managers and super approvers see all; others see only their assigned pending records
+    if (!isManager && !isSuperApprover) {
       filters.push('AND', ['nextapprover', 'anyof', [userId]]);
     }
 
@@ -150,7 +162,7 @@ define([
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId) {
+  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover) {
     const totalApproved = rows.filter(r => r.status === C.APPROVAL_STATUS.APPROVED).reduce((s, r) => s + r.amount, 0);
     const totalRejected = rows.filter(r => r.status === C.APPROVAL_STATUS.REJECTED).reduce((s, r) => s + r.amount, 0);
     const totalPending  = rows.filter(r => r.status === C.APPROVAL_STATUS.PENDING).length;
@@ -160,16 +172,32 @@ define([
     const tableRows = rows.map(r => {
       const isAssigned = String(r.nextApproverId) === String(userId);
       const isPending  = r.status === C.APPROVAL_STATUS.PENDING;
-      const actionOptions = !isPending
-        ? `<option value="">— Not pending —</option>`
-        : isAssigned
-          ? `<option value="">— Select action —</option>
+      let actionOptions;
+      if (!isPending) {
+        actionOptions = `<option value="">— Not pending —</option>`;
+      } else if (isAssigned) {
+        actionOptions = `<option value="">— Select action —</option>
              <option value="approve">Approve</option>
              <option value="decline">Reject</option>
-             <option value="skip">Skip</option>`
-          : `<option value="">— Select action —</option>
+             <option value="skip">Skip</option>`;
+      } else if (isSuperApprover) {
+        actionOptions = `<option value="">— Select action —</option>
+             <option value="super_approve">Super Approve</option>
+             <option value="super_decline">Super Reject</option>
              <option value="reassign">Reassign</option>
              <option value="skip">Skip</option>`;
+      } else {
+        actionOptions = `<option value="">— Select action —</option>
+             <option value="reassign">Reassign</option>
+             <option value="skip">Skip</option>`;
+      }
+      const inputCell = !isPending
+        ? ''
+        : isAssigned
+          ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+          : isSuperApprover
+            ? `<input type="text" class="super-reason-input" data-id="${_esc(r.id)}" placeholder="Override justification (required)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
+            : `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`;
       return `
       <tr data-id="${_esc(r.id)}" data-type="${_esc(r.type)}">
         <td>
@@ -177,12 +205,7 @@ define([
             ${actionOptions}
           </select>
         </td>
-        <td>${isPending && isAssigned
-          ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-          : isPending
-            ? `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-            : ''
-        }</td>
+        <td>${inputCell}</td>
         <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${_esc(r.typeLabel)}</span></td>
         <td class="fw500">${_esc(r.entity) || '—'}</td>
         <td class="mono">${_esc(r.tranid)}</td>
@@ -341,6 +364,7 @@ function resetAll() {
   document.querySelectorAll('.action-select').forEach(s => s.value = '');
   document.querySelectorAll('.reason-input').forEach(i => i.value = '');
   document.querySelectorAll('.reassign-input').forEach(i => i.value = '');
+  document.querySelectorAll('.super-reason-input').forEach(i => i.value = '');
 }
 
 async function submitAll() {
@@ -348,19 +372,24 @@ async function submitAll() {
   let valid = true;
   document.querySelectorAll('tr[data-id]').forEach(row => {
     if (!valid) return;
-    const id          = row.dataset.id;
-    const type        = row.dataset.type;
-    const action      = row.querySelector('.action-select').value;
-    const reason      = row.querySelector('.reason-input')?.value || '';
-    const newApprover = row.querySelector('.reassign-input')?.value.trim() || '';
+    const id            = row.dataset.id;
+    const type          = row.dataset.type;
+    const action        = row.querySelector('.action-select').value;
+    const reason        = row.querySelector('.reason-input')?.value || '';
+    const superReason   = row.querySelector('.super-reason-input')?.value || '';
+    const newApprover   = row.querySelector('.reassign-input')?.value.trim() || '';
     if (!action || action === 'skip') return;
     if (action === 'decline' && !reason.trim()) {
       showToast('Please provide a reason for all rejections.'); valid = false; return;
     }
+    if ((action === 'super_approve' || action === 'super_decline') && !superReason.trim()) {
+      showToast('Override justification is required for all Super Approve/Reject actions.'); valid = false; return;
+    }
     if (action === 'reassign' && !newApprover) {
       showToast('Please enter a new approver ID for all reassignments.'); valid = false; return;
     }
-    actions.push({ recordId: id, recordType: type, action, comment: reason, newApprover });
+    const comment = action === 'decline' ? reason : (action === 'super_approve' || action === 'super_decline') ? superReason : reason;
+    actions.push({ recordId: id, recordType: type, action, comment, newApprover });
   });
   if (!valid) return;
 

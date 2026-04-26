@@ -29,7 +29,9 @@ define([], () => {
         EMAIL_SENDER:      'custrecord_oa_email_sender',
         EMAIL_SUBJECT:          'custrecord_oa_email_subject',
         EMAIL_INTRO:            'custrecord_oa_email_intro',
-        APPROVE_WITHOUT_LOGIN:  'custrecord_oa_approve_without_login'
+        APPROVE_WITHOUT_LOGIN:    'custrecord_oa_approve_without_login',
+      RESUBMIT_THRESHOLD_PCT:   'custrecord_oas_resubmit_threshold_pct',
+      RESUBMIT_THRESHOLD_ABS:   'custrecord_oas_resubmit_threshold_abs'
       },
       HIERARCHY: {
         SETTINGS:     'custrecord_oah_settings',
@@ -62,11 +64,12 @@ define([], () => {
         SOURCE:      'custrecord_oal_source'
       },
       EMPLOYEE: {
-        IS_APPROVER:  'custentity_oa_is_approver',
-        IS_MANAGER:   'custentity_oa_is_manager',
-        CAN_DELEGATE: 'custentity_oa_can_delegate',
-        USE_EMAIL:    'custentity_oa_use_email',
-        DELEGATE_TO:  'custentity_oa_delegate_to'
+        IS_APPROVER:       'custentity_oa_is_approver',
+        IS_MANAGER:        'custentity_oa_is_manager',
+        IS_SUPER_APPROVER: 'custentity_oa_is_super_approver',
+        CAN_DELEGATE:      'custentity_oa_can_delegate',
+        USE_EMAIL:         'custentity_oa_use_email',
+        DELEGATE_TO:       'custentity_oa_delegate_to'
       },
       // custbody fields — may not exist on all record types; all writes wrapped in try/catch
       TRANSACTION: {
@@ -87,12 +90,15 @@ define([], () => {
     },
 
     LOG_ACTIONS: {
-      SUBMITTED:  '1',
-      APPROVED:   '2',
-      REJECTED:   '3',
-      DELEGATED:  '4',
-      REASSIGNED: '5',
-      RESET:      '6'
+      SUBMITTED:      '1',
+      APPROVED:       '2',
+      REJECTED:       '3',
+      DELEGATED:      '4',
+      REASSIGNED:     '5',
+      RESET:          '6',
+      SUPER_APPROVED: '7',
+      SUPER_REJECTED: '8',
+      RESUBMITTED:    '9'
     },
 
     LOG_SOURCES: {

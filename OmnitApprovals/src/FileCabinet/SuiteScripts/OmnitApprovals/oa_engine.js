@@ -24,9 +24,13 @@ define([
         ['isinactive', 'is', 'F']
       ],
       columns: Object.values(C.FIELDS.SETTINGS)
-    }).run().each(r => { results.push(r); return false; });
+    }).run().each(r => { results.push(r); return true; });
 
     if (!results.length) return null;
+    if (results.length > 1) {
+      results.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+      log.error('OA: Multiple active settings records for subsidiary ' + subsidiaryId + ' — using id=' + results[0].id);
+    }
     const r   = results[0];
     const obj = { id: r.id };
     Object.entries(C.FIELDS.SETTINGS).forEach(([k, fid]) => {
@@ -201,7 +205,7 @@ define([
 
   // ─── Process Approval ────────────────────────────────────────────────────────
 
-  function processApproval(recordId, recordType, actorId, source) {
+  function processApproval(recordId, recordType, actorId, source, superComment) {
     source = source || C.LOG_SOURCES.NETSUITE;
     let txn;
     try {
@@ -216,30 +220,39 @@ define([
     if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
       return { success: false, message: 'Transaction is not pending approval.' };
     }
-    if (!currentApprover || String(currentApprover) !== String(actorId)) {
-      return { success: false, message: 'You are not the assigned approver for this step.' };
+
+    const isSuperOverride = !currentApprover || String(currentApprover) !== String(actorId);
+    if (isSuperOverride) {
+      if (!_isSuperApprover(actorId)) {
+        return { success: false, message: 'You are not the assigned approver for this step.' };
+      }
+      if (!superComment || !superComment.trim()) {
+        return { success: false, message: 'Super approver override requires a written justification.' };
+      }
     }
 
     const step = _countApprovedLogs(recordId) + 1;
 
-    // Check if a step-2 approver is needed
-    const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
-    const routing      = routeForApproval(recordType, recordId, subsidiaryId);
+    if (!isSuperOverride) {
+      // Normal flow: check if a step-2 approver is needed
+      const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
+      const routing      = routeForApproval(recordType, recordId, subsidiaryId);
 
-    if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
-      _setNextApprover(txn, routing.approver2);
-      try {
-        txn.save({ ignoreMandatoryFields: true });
-      } catch (e) {
-        log.error('OA: save failed advancing to step 2', `recordId=${recordId}: ${e.message}`);
-        return { success: false, message: 'Save failed: ' + e.message };
+      if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
+        _setNextApprover(txn, routing.approver2);
+        try {
+          txn.save({ ignoreMandatoryFields: true });
+        } catch (e) {
+          log.error('OA: save failed advancing to step 2', `recordId=${recordId}: ${e.message}`);
+          return { success: false, message: 'Save failed: ' + e.message };
+        }
+        createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step: 1, source });
+        _scheduleNotification(recordId, recordType);
+        return { success: true, nextStep: 2, message: 'Advanced to step 2.' };
       }
-      createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step: 1, source });
-      _scheduleNotification(recordId, recordType);
-      return { success: true, nextStep: 2, message: 'Advanced to step 2.' };
     }
 
-    // Final approval
+    // Final approval (normal or super override)
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
     try {
       txn.save({ ignoreMandatoryFields: true });
@@ -247,13 +260,14 @@ define([
       log.error('OA: save failed on final approval', `recordId=${recordId}: ${e.message}`);
       return { success: false, message: 'Save failed: ' + e.message };
     }
-    createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.APPROVED, actorId, step, source });
+    const logAction = isSuperOverride ? C.LOG_ACTIONS.SUPER_APPROVED : C.LOG_ACTIONS.APPROVED;
+    createAuditLog({ transactionId: recordId, action: logAction, actorId, step, source, comment: superComment || undefined });
     return { success: true, nextStep: null, message: 'Transaction approved.' };
   }
 
   // ─── Process Decline ─────────────────────────────────────────────────────────
 
-  function processDecline(recordId, recordType, actorId, comment, source) {
+  function processDecline(recordId, recordType, actorId, comment, source, isSuperOverride) {
     source = source || C.LOG_SOURCES.NETSUITE;
     let txn;
     try {
@@ -268,8 +282,15 @@ define([
     if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
       return { success: false, message: 'Transaction is not pending approval.' };
     }
-    if (!currentApprover || String(currentApprover) !== String(actorId)) {
-      return { success: false, message: 'You are not the assigned approver for this step.' };
+
+    const isNotAssigned = !currentApprover || String(currentApprover) !== String(actorId);
+    if (isNotAssigned) {
+      if (!isSuperOverride || !_isSuperApprover(actorId)) {
+        return { success: false, message: 'You are not the assigned approver for this step.' };
+      }
+      if (!comment || !comment.trim()) {
+        return { success: false, message: 'Super approver override requires a written justification.' };
+      }
     }
 
     const step = _countApprovedLogs(recordId) + 1;
@@ -281,7 +302,8 @@ define([
       log.error('OA: save failed on decline', `recordId=${recordId}: ${e.message}`);
       return { success: false, message: 'Save failed: ' + e.message };
     }
-    createAuditLog({ transactionId: recordId, action: C.LOG_ACTIONS.REJECTED, actorId, step, comment, source });
+    const logAction = (isNotAssigned && isSuperOverride) ? C.LOG_ACTIONS.SUPER_REJECTED : C.LOG_ACTIONS.REJECTED;
+    createAuditLog({ transactionId: recordId, action: logAction, actorId, step, comment, source });
     return { success: true, message: 'Transaction rejected.' };
   }
 
@@ -413,6 +435,10 @@ define([
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  function _isSuperApprover(actorId) {
+    return !!utils.lookupEmployeeField(actorId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER);
+  }
 
   function _setNextApprover(txn, employeeId) {
     try {

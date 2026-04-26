@@ -95,5 +95,15 @@
       <ismandatory>F</ismandatory>
       <defaultchecked>F</defaultchecked>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oas_resubmit_threshold_pct">
+      <label>Re-submit Threshold (%)</label>
+      <fieldtype>FLOAT</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oas_resubmit_threshold_abs">
+      <label>Re-submit Threshold (amount)</label>
+      <fieldtype>CURRENCY</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>

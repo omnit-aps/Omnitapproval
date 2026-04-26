@@ -11,21 +11,27 @@ define([
   'use strict';
 
   const ACTION_LABELS = {
-    [C.LOG_ACTIONS.SUBMITTED]:  'Submitted',
-    [C.LOG_ACTIONS.APPROVED]:   'Approved',
-    [C.LOG_ACTIONS.REJECTED]:   'Rejected',
-    [C.LOG_ACTIONS.DELEGATED]:  'Delegated',
-    [C.LOG_ACTIONS.REASSIGNED]: 'Reassigned',
-    [C.LOG_ACTIONS.RESET]:      'Reset'
+    [C.LOG_ACTIONS.SUBMITTED]:      'Submitted',
+    [C.LOG_ACTIONS.APPROVED]:       'Approved',
+    [C.LOG_ACTIONS.REJECTED]:       'Rejected',
+    [C.LOG_ACTIONS.DELEGATED]:      'Delegated',
+    [C.LOG_ACTIONS.REASSIGNED]:     'Reassigned',
+    [C.LOG_ACTIONS.RESET]:          'Reset',
+    [C.LOG_ACTIONS.SUPER_APPROVED]: 'Super Approved',
+    [C.LOG_ACTIONS.SUPER_REJECTED]: 'Super Rejected',
+    [C.LOG_ACTIONS.RESUBMITTED]:    'Re-submitted'
   };
 
   const ACTION_COLORS = {
-    [C.LOG_ACTIONS.SUBMITTED]:  '#1a56db',
-    [C.LOG_ACTIONS.APPROVED]:   '#057a55',
-    [C.LOG_ACTIONS.REJECTED]:   '#c74634',
-    [C.LOG_ACTIONS.DELEGATED]:  '#9061f9',
-    [C.LOG_ACTIONS.REASSIGNED]: '#9061f9',
-    [C.LOG_ACTIONS.RESET]:      '#d97706'
+    [C.LOG_ACTIONS.SUBMITTED]:      '#1a56db',
+    [C.LOG_ACTIONS.APPROVED]:       '#057a55',
+    [C.LOG_ACTIONS.REJECTED]:       '#c74634',
+    [C.LOG_ACTIONS.DELEGATED]:      '#9061f9',
+    [C.LOG_ACTIONS.REASSIGNED]:     '#9061f9',
+    [C.LOG_ACTIONS.RESET]:          '#d97706',
+    [C.LOG_ACTIONS.SUPER_APPROVED]: '#1b5e20',
+    [C.LOG_ACTIONS.SUPER_REJECTED]: '#880e4f',
+    [C.LOG_ACTIONS.RESUBMITTED]:    '#0d47a1'
   };
 
   const SOURCE_LABELS = {

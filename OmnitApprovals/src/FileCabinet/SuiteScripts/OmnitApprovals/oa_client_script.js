@@ -85,6 +85,36 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
     });
   }
 
+  // ─── Super Approve (override) ────────────────────────────────────────────────
+
+  function OA_super_approve(slUrl) {
+    _inputModal('Super Approve — override', 'Justification for override (required)').then(comment => {
+      if (!comment) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:      'super_approve',
+        oa_record_id:   rec.id,
+        oa_record_type: rec.type,
+        oa_comment:     comment
+      });
+    });
+  }
+
+  // ─── Super Reject (override) ─────────────────────────────────────────────────
+
+  function OA_super_decline(slUrl) {
+    _inputModal('Super Reject — override', 'Reason for rejection and justification for override (required)').then(comment => {
+      if (!comment) return;
+      const rec = currentRecord.get();
+      _post(slUrl, {
+        oa_action:      'super_decline',
+        oa_record_id:   rec.id,
+        oa_record_type: rec.type,
+        oa_comment:     comment
+      });
+    });
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   function _inputModal(title, placeholder) {
@@ -166,5 +196,5 @@ define(['N/currentRecord', 'N/https', 'N/ui/dialog'], (currentRecord, https, dia
     );
   }
 
-  return { pageInit, OA_approve, OA_decline, OA_delegate, OA_reset, OA_reassign, OA_history };
+  return { pageInit, OA_approve, OA_decline, OA_delegate, OA_reset, OA_reassign, OA_history, OA_super_approve, OA_super_decline };
 });

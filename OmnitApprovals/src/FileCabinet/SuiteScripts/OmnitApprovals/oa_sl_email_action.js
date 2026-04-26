@@ -166,6 +166,12 @@ define([
       case 'decline':
         result = engine.processDecline(recordId, recordType, userId, req.parameters.oa_comment);
         break;
+      case 'super_approve':
+        result = engine.processApproval(recordId, recordType, userId, C.LOG_SOURCES.NETSUITE, req.parameters.oa_comment);
+        break;
+      case 'super_decline':
+        result = engine.processDecline(recordId, recordType, userId, req.parameters.oa_comment, C.LOG_SOURCES.NETSUITE, true);
+        break;
       case 'delegate':
         result = engine.processDelegation(recordId, recordType, userId, req.parameters.oa_target);
         break;

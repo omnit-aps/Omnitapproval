@@ -80,8 +80,30 @@ define([
         log.error('OA-UE-BEFORE: OA log history check failed', e.message);
       }
       if (hasOaHistory) {
-        log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on record with existing OA history', recordId });
-        return;
+        // Check if amount change exceeds the re-submit threshold configured for this subsidiary
+        const subId    = rec.getValue('subsidiary');
+        const settings = subId ? engine.getSettingsForSubsidiary(subId) : null;
+        const pctCfg   = parseFloat(settings && settings.resubmit_threshold_pct) || 0;
+        const absCfg   = parseFloat(settings && settings.resubmit_threshold_abs) || 0;
+
+        if (pctCfg > 0 || absCfg > 0) {
+          const oldAmt  = parseFloat(context.oldRecord.getValue('total') || context.oldRecord.getValue('amount') || 0) || 0;
+          const newAmt  = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+          const pctChg  = oldAmt > 0 ? Math.abs((newAmt - oldAmt) / oldAmt) * 100 : 0;
+          const absChg  = Math.abs(newAmt - oldAmt);
+          const exceeded = (pctCfg > 0 && pctChg >= pctCfg) || (absCfg > 0 && absChg >= absCfg);
+
+          if (exceeded) {
+            log.audit('OA-UE-BEFORE threshold exceeded — re-routing', { recordId, oldAmt, newAmt, pctChg: pctChg.toFixed(2), absChg });
+            // Fall through to re-run routing below
+          } else {
+            log.audit('OA-UE-BEFORE skip', { reason: 'EDIT within threshold', recordId, pctChg: pctChg.toFixed(2), absChg });
+            return;
+          }
+        } else {
+          log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on record with OA history, no threshold configured', recordId });
+          return;
+        }
       }
     }
 
@@ -177,9 +199,21 @@ define([
 
     log.audit('OA-UE-AFTER bookkeeping', { recordId, recordType, nextApprover });
 
+    // Determine whether this is an initial submission or a threshold-triggered re-submission
+    let isResubmission = false;
+    if (context.type === TRIGGER.EDIT) {
+      try {
+        search.create({
+          type:    C.RECORDS.LOG,
+          filters: [[C.FIELDS.LOG.TRANSACTION, 'equalto', recordId], 'AND', [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTED]],
+          columns: ['internalid']
+        }).run().each(() => { isResubmission = true; return false; });
+      } catch (e) { /* graceful */ }
+    }
+
     engine.createAuditLog({
       transactionId: recordId,
-      action:        C.LOG_ACTIONS.SUBMITTED,
+      action:        isResubmission ? C.LOG_ACTIONS.RESUBMITTED : C.LOG_ACTIONS.SUBMITTED,
       actorId:       runtime.getCurrentUser().id,
       step:          1,
       source:        C.LOG_SOURCES.NETSUITE
@@ -300,6 +334,7 @@ define([
     const isCurrentApprover = currentApprover && String(currentApprover) === String(userId);
     const canDelegate       = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE);
     const isManager         = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER);
+    const isSuperApprover   = utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER);
 
     const subsidiaryId = utils.getTransactionSubsidiary(rec.type, rec.id);
     const settings     = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
@@ -323,6 +358,11 @@ define([
     if (isManager) {
       form.addButton({ id: 'custpage_oa_reset',    label: 'Reset flow', functionName: `OA_reset('${slUrl}')` });
       form.addButton({ id: 'custpage_oa_reassign', label: 'Reassign',   functionName: `OA_reassign('${slUrl}')` });
+    }
+
+    if (isSuperApprover && !isCurrentApprover) {
+      form.addButton({ id: 'custpage_oa_super_approve', label: 'Super Approve', functionName: `OA_super_approve('${slUrl}')` });
+      form.addButton({ id: 'custpage_oa_super_decline', label: 'Super Reject',  functionName: `OA_super_decline('${slUrl}')` });
     }
   }
 
