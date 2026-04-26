@@ -147,7 +147,17 @@ define([
         .replace('{docNumber}', documentNumber);
       const emailIntro   = settings.email_intro || '';
 
-      const senderEmployeeId = settings.email_sender || runtime.getCurrentUser().id;
+      // Validate sender: MR "current user" is often a system/script context (non-employee).
+      // Prefer the configured email_sender; fall back only if it's a valid employee ID.
+      const configuredSender = settings.email_sender ? parseInt(settings.email_sender, 10) : 0;
+      const runtimeUserId    = runtime.getCurrentUser().id;
+      const senderEmployeeId = configuredSender > 0 ? configuredSender
+                             : runtimeUserId > 0    ? runtimeUserId
+                             : null;
+      if (!senderEmployeeId) {
+        log.error('OA MR: no valid sender employee — configure email_sender in subsidiary settings', { recordId, subsidiaryId });
+        return;
+      }
 
       const slUrl = url.resolveScript({
         scriptId:          'customscript_oa_sl_email_action',

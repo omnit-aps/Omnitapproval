@@ -7,11 +7,12 @@ define([
   'N/record',
   'N/runtime',
   'N/search',
+  'N/url',
   './lib/oa_constants',
   './lib/oa_utils',
   './lib/oa_email_template',
   './oa_engine'
-], (record, runtime, search, C, utils, tpl, engine) => {
+], (record, runtime, search, url, C, utils, tpl, engine) => {
   'use strict';
 
   utils.setHmacSecret(runtime.getCurrentScript().getParameter({ name: 'custscript_oa_ea_hmac_secret' }));
@@ -92,7 +93,7 @@ define([
     }
 
     if (action === 'decline') {
-      const actionUrl  = req.url.split('?')[0];
+      const actionUrl  = url.resolveScript({ scriptId: 'customscript_oa_sl_email_action', deploymentId: 'customdeploy_oa_sl_email_action', returnExternalUrl: true });
       const currency   = fields.currency && fields.currency[0] ? fields.currency[0].text : '';
       resp.write(tpl.buildDeclineCommentPage({
         documentNumber: fields.tranid,
@@ -132,6 +133,21 @@ define([
         return;
       }
 
+      // Apply the same approve_without_login gate as the GET flow — unauthenticated
+      // users must be explicitly permitted by the subsidiary settings.
+      if (runtime.getCurrentUser().id <= 0) {
+        let declineFields;
+        try {
+          declineFields = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['subsidiary'] });
+        } catch (e) { declineFields = null; }
+        const subId    = declineFields && declineFields.subsidiary && declineFields.subsidiary[0] ? declineFields.subsidiary[0].value : null;
+        const settings = subId ? engine.getSettingsForSubsidiary(subId) : null;
+        if (!(settings && utils.parseBool(settings.approve_without_login))) {
+          resp.write(_errorPage('Approval without login is not enabled for this subsidiary. Please log in to NetSuite.'));
+          return;
+        }
+      }
+
       // Verify live state
       let fields;
       try {
@@ -155,8 +171,13 @@ define([
       return;
     }
 
-    // UI-triggered actions (require an active NetSuite login)
+    // UI-triggered actions require an authenticated NetSuite session
     const userId = runtime.getCurrentUser().id;
+    if (userId <= 0) {
+      resp.setHeader({ name: 'Content-Type', value: 'application/json' });
+      resp.write(JSON.stringify({ success: false, message: 'Authentication required. Please log in to NetSuite.' }));
+      return;
+    }
     let result;
 
     switch (action) {

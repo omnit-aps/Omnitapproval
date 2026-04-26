@@ -133,8 +133,8 @@ define([
     }
 
     const rtEnabled = recordType === C.RECORD_TYPES.PURCHASE_ORDER
-      ? settings.enable_po
-      : settings.enable_vb;
+      ? utils.parseBool(settings.enable_po)
+      : utils.parseBool(settings.enable_vb);
     if (!rtEnabled) {
       log.audit('OA-ENGINE routeForApproval', { recordType, recordId, subsidiaryId, error: 'RECORD_TYPE_DISABLED' });
       return { error: 'RECORD_TYPE_DISABLED' };
@@ -147,7 +147,7 @@ define([
     let matchedThresholdId = null;
     let amount = null;
 
-    if (settings.use_amount) {
+    if (utils.parseBool(settings.use_amount)) {
       const hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
         hierarchyId = hierarchy.id;
@@ -189,14 +189,14 @@ define([
   // ─── Step helper ─────────────────────────────────────────────────────────────
 
   function _countApprovedLogs(recordId) {
-    // ACTION is a TEXT field — must use 'is', not 'anyof'
+    // Count both normal approvals and super approver overrides — ACTION is a TEXT field.
     let count = 0;
     search.create({
       type:    C.RECORDS.LOG,
       filters: [
         [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
         'AND',
-        [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED]
+        [[C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED], 'OR', [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUPER_APPROVED]]
       ],
       columns: ['internalid']
     }).run().each(() => { count++; return true; });

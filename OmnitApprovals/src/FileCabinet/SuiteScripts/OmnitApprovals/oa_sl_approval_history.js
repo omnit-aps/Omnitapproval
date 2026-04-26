@@ -6,8 +6,9 @@
 define([
   'N/runtime',
   'N/search',
-  './lib/oa_constants'
-], (runtime, search, C) => {
+  './lib/oa_constants',
+  './lib/oa_utils'
+], (runtime, search, C, utils) => {
   'use strict';
 
   const ACTION_LABELS = {
@@ -114,7 +115,7 @@ define([
     });
 
     const docNumber   = txn.tranid || recordId;
-    const statusVal   = txn.approvalstatus;
+    const statusVal   = utils.selectValue(txn.approvalstatus);
     const statusText  = STATUS_LABELS[statusVal] || statusVal || '—';
     const statusColor = STATUS_COLORS[statusVal]  || '#888';
     const subsidiary  = txn.subsidiary && txn.subsidiary[0] ? txn.subsidiary[0].text : '—';

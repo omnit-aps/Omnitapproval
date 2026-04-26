@@ -41,7 +41,7 @@
       <label>Default Approver 1</label>
       <fieldtype>SELECT</fieldtype>
       <selectrecordtype>-4</selectrecordtype>
-      <ismandatory>T</ismandatory>
+      <ismandatory>F</ismandatory>
     </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oa_default_approver2">
       <label>Default Approver 2</label>

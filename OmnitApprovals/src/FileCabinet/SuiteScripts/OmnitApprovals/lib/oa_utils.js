@@ -22,7 +22,10 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
   }
 
   function _b64urlDecode(b64url) {
-    const padded = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    const base64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    // Re-add = padding so length is a multiple of 4 (stripped by _b64urlEncode)
+    const pad     = base64.length % 4;
+    const padded  = pad ? base64 + '='.repeat(4 - pad) : base64;
     return encode.convert({
       string:         padded,
       inputEncoding:  encode.Encoding.BASE_64,
@@ -110,6 +113,14 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     return (symbol || '') + ' ' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // parseBool — normalise checkbox values from search results.
+  // search.Result.getValue() returns boolean true/false for CHECKBOX columns in most contexts,
+  // but some NS builds return 'T'/'F' strings. Handle both to be safe.
+  function parseBool(val) {
+    if (typeof val === 'boolean') return val;
+    return val === 'T' || val === 'true' || val === '1';
+  }
+
   return {
     setHmacSecret,
     generateHmacToken,
@@ -119,6 +130,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     getTransactionAmount,
     lookupEmployeeField,
     selectValue,
+    parseBool,
     today,
     formatCurrency
   };

@@ -28,13 +28,15 @@ define([
     const typeFilter   = req.parameters.oa_filter_type   || 'all';
     const statusFilter = req.parameters.oa_filter_status || 'pending';
 
-    let isSuperApprover = false;
+    let isSuperApprover = false, isManager = false;
     try {
-      isSuperApprover = !!search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] })[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
+      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
+      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
     } catch (e) { /* graceful */ }
 
     const rows = loadPendingTransactions(userId, typeFilter, statusFilter);
-    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover));
+    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager));
   }
 
   // ─── Batch POST ───────────────────────────────────────────────────────────────
@@ -162,7 +164,7 @@ define([
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover) {
+  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager) {
     const totalApproved = rows.filter(r => r.status === C.APPROVAL_STATUS.APPROVED).reduce((s, r) => s + r.amount, 0);
     const totalRejected = rows.filter(r => r.status === C.APPROVAL_STATUS.REJECTED).reduce((s, r) => s + r.amount, 0);
     const totalPending  = rows.filter(r => r.status === C.APPROVAL_STATUS.PENDING).length;
@@ -181,15 +183,20 @@ define([
              <option value="decline">Reject</option>
              <option value="skip">Skip</option>`;
       } else if (isSuperApprover) {
+        // Super approver: can override-approve/reject; managers additionally see reassign
+        const reassignOpt = isManager ? `\n             <option value="reassign">Reassign</option>` : '';
         actionOptions = `<option value="">— Select action —</option>
              <option value="super_approve">Super Approve</option>
-             <option value="super_decline">Super Reject</option>
+             <option value="super_decline">Super Reject</option>${reassignOpt}
+             <option value="skip">Skip</option>`;
+      } else if (isManager) {
+        // Manager only: can reassign but not approve directly
+        actionOptions = `<option value="">— Select action —</option>
              <option value="reassign">Reassign</option>
              <option value="skip">Skip</option>`;
       } else {
-        actionOptions = `<option value="">— Select action —</option>
-             <option value="reassign">Reassign</option>
-             <option value="skip">Skip</option>`;
+        // Regular approver not assigned to this record — no actionable options
+        actionOptions = `<option value="">— Not your record —</option>`;
       }
       const inputCell = !isPending
         ? ''
@@ -197,7 +204,7 @@ define([
           ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
           : isSuperApprover
             ? `<input type="text" class="super-reason-input" data-id="${_esc(r.id)}" placeholder="Override justification (required)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-            : `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`;
+            : (isManager ? `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">` : '');
       return `
       <tr data-id="${_esc(r.id)}" data-type="${_esc(r.type)}">
         <td>
