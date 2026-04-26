@@ -85,9 +85,23 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     return result.subsidiary && result.subsidiary[0] ? result.subsidiary[0].value : null;
   }
 
+  // Returns the transaction amount in the SUBSIDIARY BASE CURRENCY.
+  // Approval matrix thresholds are defined in base currency, so foreign-currency
+  // POs/Vendor Bills must be converted before threshold matching, otherwise
+  // 100,000 EUR and 100,000 DKK would route to the same approver.
   function getTransactionAmount(recordType, recordId) {
-    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount'] });
-    return parseFloat(result.amount) || 0;
+    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount', 'exchangerate'] });
+    const foreignAmount = parseFloat(result.amount) || 0;
+    const rate          = parseFloat(result.exchangerate) || 1;
+    return foreignAmount * rate;
+  }
+
+  // Convert a foreign-currency amount read from a record (rec.getValue) to base
+  // currency using the record's exchangerate field. Falls back to rate=1 when
+  // unavailable (e.g. base-currency transactions).
+  function toBaseCurrency(rec, foreignAmount) {
+    const rate = parseFloat(rec.getValue('exchangerate')) || 1;
+    return (parseFloat(foreignAmount) || 0) * rate;
   }
 
   function lookupEmployeeField(employeeId, fieldId) {
@@ -128,6 +142,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     getCurrentUserId,
     getTransactionSubsidiary,
     getTransactionAmount,
+    toBaseCurrency,
     lookupEmployeeField,
     selectValue,
     parseBool,

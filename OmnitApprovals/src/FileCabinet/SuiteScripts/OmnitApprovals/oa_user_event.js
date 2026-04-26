@@ -100,10 +100,15 @@ define([
           const absCfg   = parseFloat(settings && settings.resubmit_threshold_abs) || 0;
 
           if (pctCfg > 0 || absCfg > 0) {
-            const oldAmt   = parseFloat(context.oldRecord.getValue('total') || context.oldRecord.getValue('amount') || 0) || 0;
-            const newAmt   = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
-            const pctChg   = oldAmt > 0 ? Math.abs((newAmt - oldAmt) / oldAmt) * 100 : 0;
-            const absChg   = Math.abs(newAmt - oldAmt);
+            // Convert both old and new amounts to subsidiary base currency.
+            // Re-submission threshold (resubmit_threshold_abs) is in base currency,
+            // so absChg must also be in base currency for the comparison to make sense.
+            const oldForeign = parseFloat(context.oldRecord.getValue('total') || context.oldRecord.getValue('amount') || 0) || 0;
+            const newForeign = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+            const oldAmt     = utils.toBaseCurrency(context.oldRecord, oldForeign);
+            const newAmt     = utils.toBaseCurrency(rec,                newForeign);
+            const pctChg     = oldAmt > 0 ? Math.abs((newAmt - oldAmt) / oldAmt) * 100 : 0;
+            const absChg     = Math.abs(newAmt - oldAmt);
             const exceeded = (pctCfg > 0 && pctChg >= pctCfg) || (absCfg > 0 && absChg >= absCfg);
 
             if (exceeded) {
@@ -127,8 +132,11 @@ define([
       return;
     }
 
-    // Read amount directly from the record being submitted (recordId may be null on CREATE)
-    const amount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+    // Read amount directly from the record being submitted (recordId may be null on CREATE).
+    // Convert to subsidiary base currency — approval matrix thresholds are in base currency,
+    // so a 100,000 EUR PO must compare against base-currency thresholds, not the foreign 100,000.
+    const foreignAmount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+    const amount        = utils.toBaseCurrency(rec, foreignAmount);
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
