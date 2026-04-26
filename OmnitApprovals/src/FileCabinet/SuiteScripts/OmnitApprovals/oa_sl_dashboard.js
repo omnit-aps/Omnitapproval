@@ -8,8 +8,9 @@ define([
   'N/search',
   'N/url',
   './lib/oa_constants',
+  './lib/oa_utils',
   './oa_engine'
-], (runtime, search, url, C, engine) => {
+], (runtime, search, url, C, utils, engine) => {
   'use strict';
 
   function onRequest(context) {
@@ -31,8 +32,8 @@ define([
     let isSuperApprover = false, isManager = false;
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
-      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
-      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
+      isSuperApprover = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER]);
+      isManager       = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER]);
     } catch (e) { /* graceful */ }
 
     const rows = loadPendingTransactions(userId, typeFilter, statusFilter);
@@ -47,9 +48,9 @@ define([
     let isApprover = false, isManager = false, isSuperApprover = false;
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
-      isApprover      = !!emp[C.FIELDS.EMPLOYEE.IS_APPROVER];
-      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
-      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
+      isApprover      = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_APPROVER]);
+      isManager       = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER]);
+      isSuperApprover = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER]);
     } catch (e) { /* no employee record */ }
 
     if (!isApprover && !isManager && !isSuperApprover) {
@@ -98,8 +99,8 @@ define([
     let isManager = false, isSuperApprover = false;
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
-      isManager       = !!emp[C.FIELDS.EMPLOYEE.IS_MANAGER];
-      isSuperApprover = !!emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER];
+      isManager       = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER]);
+      isSuperApprover = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER]);
     } catch (e) { /* user has no employee record — treat as non-manager */ }
 
     const statusMap = { pending: C.APPROVAL_STATUS.PENDING, approved: C.APPROVAL_STATUS.APPROVED, rejected: C.APPROVAL_STATUS.REJECTED };

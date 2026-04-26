@@ -74,7 +74,7 @@ define([
     // Managers can always view
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER] });
-      if (emp[C.FIELDS.EMPLOYEE.IS_MANAGER]) return true;
+      if (utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER])) return true;
     } catch (e) { /* no employee record */ }
 
     // Current next approver can view

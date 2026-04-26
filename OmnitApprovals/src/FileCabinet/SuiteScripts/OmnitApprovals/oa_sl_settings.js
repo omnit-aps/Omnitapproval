@@ -26,7 +26,7 @@ define([
     // SDF audience setting; a misconfigured deployment shouldn't leak access.
     const user      = runtime.getCurrentUser();
     const isAdmin   = user.roleId === 'administrator' || user.role === 3;
-    const isManager = !!utils.lookupEmployeeField(user.id, C.FIELDS.EMPLOYEE.IS_MANAGER);
+    const isManager = utils.parseBool(utils.lookupEmployeeField(user.id, C.FIELDS.EMPLOYEE.IS_MANAGER));
     if (!isAdmin && !isManager) {
       resp.write('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Access denied</title>'
         + '<style>body{font-family:-apple-system,sans-serif;background:#f4f4f4;padding:80px 20px}'
