@@ -6,15 +6,4 @@
   <notifyadmins>F</notifyadmins>
   <notifyemails></notifyemails>
   <notifyowner>T</notifyowner>
-  <scriptdeployments>
-    <scriptdeployment scriptid="customdeploy_oa_ue_settings">
-      <status>RELEASED</status>
-      <recordtype>customrecord_oa_settings</recordtype>
-      <allemployees>T</allemployees>
-      <allpartners>F</allpartners>
-      <allroles>T</allroles>
-      <isdeployed>T</isdeployed>
-      <loglevel>DEBUG</loglevel>
-    </scriptdeployment>
-  </scriptdeployments>
 </usereventscript>
