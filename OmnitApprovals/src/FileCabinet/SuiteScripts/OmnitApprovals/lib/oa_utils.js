@@ -85,15 +85,15 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     return result.subsidiary && result.subsidiary[0] ? result.subsidiary[0].value : null;
   }
 
-  // Returns the transaction amount in the SUBSIDIARY BASE CURRENCY.
-  // Approval matrix thresholds are defined in base currency, so foreign-currency
-  // POs/Vendor Bills must be converted before threshold matching, otherwise
-  // 100,000 EUR and 100,000 DKK would route to the same approver.
+  // Returns the transaction grand total in the SUBSIDIARY BASE CURRENCY.
+  // Hierarchy thresholds are always defined in subsidiary base currency, so
+  // foreign-currency POs/Vendor Bills must be converted before threshold matching.
+  // Uses `total` (tax-inclusive grand total) consistent with the field read in beforeSubmit.
   function getTransactionAmount(recordType, recordId) {
-    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['amount', 'exchangerate'] });
-    const foreignAmount = parseFloat(result.amount) || 0;
-    const rate          = parseFloat(result.exchangerate) || 1;
-    return foreignAmount * rate;
+    const result = search.lookupFields({ type: recordType, id: recordId, columns: ['total', 'exchangerate'] });
+    const foreignTotal = parseFloat(result.total) || 0;
+    const rate         = parseFloat(result.exchangerate) || 1;
+    return foreignTotal * rate;
   }
 
   // Convert a foreign-currency amount read from a record (rec.getValue) to base
