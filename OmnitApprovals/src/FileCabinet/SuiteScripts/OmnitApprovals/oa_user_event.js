@@ -281,6 +281,7 @@ define([
       transactionId: recordId,
       action:        isResubmission ? C.LOG_ACTIONS.RESUBMITTED : C.LOG_ACTIONS.SUBMITTED,
       actorId:       runtime.getCurrentUser().id,
+      targetId:      nextApprover,
       step:          1,
       source:        C.LOG_SOURCES.NETSUITE
     });
