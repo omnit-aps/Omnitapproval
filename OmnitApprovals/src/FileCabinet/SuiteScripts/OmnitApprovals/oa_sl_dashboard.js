@@ -112,10 +112,12 @@ define([
     const filters = [
       ['type', 'anyof', txnTypes],
       'AND',
-      ['approvalstatus', 'anyof', approvalStatuses]
+      ['approvalstatus', 'anyof', approvalStatuses],
+      'AND',
+      [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'isnotempty', null]
     ];
 
-    // Managers and super approvers see all; others see only their assigned pending records
+    // Managers and super approvers see all OA-tagged records; others see only their assigned pending records
     if (!isManager && !isSuperApprover) {
       filters.push('AND', ['custbody_oa_next_approver', 'anyof', [userId]]);
     }
