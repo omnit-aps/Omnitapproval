@@ -22,12 +22,6 @@
       <fieldtype>TEXT</fieldtype>
       <ismandatory>T</ismandatory>
     </customrecordcustomfield>
-    <customrecordcustomfield scriptid="custrecord_oah_currency">
-      <label>Currency</label>
-      <fieldtype>SELECT</fieldtype>
-      <selectrecordtype>-160</selectrecordtype>
-      <ismandatory>F</ismandatory>
-    </customrecordcustomfield>
     <customrecordcustomfield scriptid="custrecord_oah_status">
       <label>Status</label>
       <fieldtype>TEXT</fieldtype>

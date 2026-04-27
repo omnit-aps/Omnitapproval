@@ -37,7 +37,6 @@ define([], () => {
         SETTINGS:     'custrecord_oah_settings',
         NAME:         'custrecord_oah_name',
         RECORD_TYPE:  'custrecord_oah_record_type',
-        CURRENCY:     'custrecord_oah_currency',
         STATUS:       'custrecord_oah_status',
         START_DATE:   'custrecord_oah_start_date',
         END_DATE:     'custrecord_oah_end_date',
