@@ -214,7 +214,7 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
-    const currentApprover = txn.getValue('nextapprover');
+    const currentApprover = txn.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
     const approvalStatus  = txn.getValue('approvalstatus');
 
     if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
@@ -277,7 +277,7 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
-    const currentApprover = txn.getValue('nextapprover');
+    const currentApprover = txn.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
     const approvalStatus  = txn.getValue('approvalstatus');
 
     if (approvalStatus !== C.APPROVAL_STATUS.PENDING) {
@@ -324,7 +324,7 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
-    const currentApprover = txn.getValue('nextapprover');
+    const currentApprover = txn.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
     if (!currentApprover || String(currentApprover) !== String(actorId)) {
       return { success: false, message: 'You are not the assigned approver for this step.' };
     }
@@ -444,8 +444,8 @@ define([
 
   function _setNextApprover(txn, employeeId) {
     try {
-      txn.setValue({ fieldId: 'nextapprover', value: employeeId });
-      const readback = txn.getValue('nextapprover');
+      txn.setValue({ fieldId: C.FIELDS.TRANSACTION.NEXT_APPROVER, value: employeeId });
+      const readback = txn.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
       log.audit('OA-ENGINE _setNextApprover ok', { attempted: employeeId, readback, recordType: txn.type, recordId: txn.id });
     } catch (e) {
       log.audit('OA-ENGINE _setNextApprover FAILED', { attempted: employeeId, recordType: txn.type, recordId: txn.id, errorName: e.name, errorMessage: e.message });

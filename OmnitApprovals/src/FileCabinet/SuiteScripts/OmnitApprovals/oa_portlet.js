@@ -45,7 +45,7 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        ['nextapprover',   'anyof', [userId]]
+        ['custbody_oa_next_approver',   'anyof', [userId]]
       ],
       columns: [
         'internalid', 'type', 'tranid', 'entity', 'amount', 'currency'

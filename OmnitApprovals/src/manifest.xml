@@ -6,7 +6,6 @@
     <features>
       <feature required="true">SUBSIDIARIES</feature>
       <feature required="true">SERVERSIDESCRIPTING</feature>
-      <feature required="true">APPROVALROUTING</feature>
       <feature required="true">CUSTOMRECORDS</feature>
       <feature required="false">ACCOUNTING</feature>
       <feature required="false">CRM</feature>

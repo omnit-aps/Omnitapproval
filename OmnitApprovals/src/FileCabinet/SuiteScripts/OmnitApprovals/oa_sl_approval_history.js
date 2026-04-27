@@ -79,8 +79,8 @@ define([
 
     // Current next approver can view
     try {
-      const txn = search.lookupFields({ type: recordType, id: recordId, columns: ['nextapprover'] });
-      const nextApprover = txn.nextapprover && txn.nextapprover[0] ? txn.nextapprover[0].value : null;
+      const txn = search.lookupFields({ type: recordType, id: recordId, columns: ['custbody_oa_next_approver'] });
+      const nextApprover = txn.custbody_oa_next_approver && txn.custbody_oa_next_approver[0] ? txn.custbody_oa_next_approver[0].value : null;
       if (nextApprover && String(nextApprover) === String(userId)) return true;
     } catch (e) { /* graceful */ }
 
@@ -111,7 +111,7 @@ define([
     const txn = search.lookupFields({
       type:    recordType,
       id:      recordId,
-      columns: ['tranid', 'approvalstatus', 'amount', 'currency', 'subsidiary', 'nextapprover']
+      columns: ['tranid', 'approvalstatus', 'amount', 'currency', 'subsidiary', 'custbody_oa_next_approver']
     });
 
     const docNumber   = txn.tranid || recordId;
@@ -121,7 +121,7 @@ define([
     const subsidiary  = txn.subsidiary && txn.subsidiary[0] ? txn.subsidiary[0].text : '—';
     const amount      = parseFloat(txn.amount) || 0;
     const currency    = txn.currency && txn.currency[0] ? txn.currency[0].text : '';
-    const nextApprover = txn.nextapprover && txn.nextapprover[0] ? txn.nextapprover[0].text : '—';
+    const nextApprover = txn.custbody_oa_next_approver && txn.custbody_oa_next_approver[0] ? txn.custbody_oa_next_approver[0].text : '—';
     const rtLabel     = recordType === 'purchaseorder' ? 'Purchase Order' : 'Vendor Bill';
 
     // ── Audit log entries ─────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        ['nextapprover', 'isnotempty', null]
+        ['custbody_oa_next_approver', 'isnotempty', null]
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
@@ -82,7 +82,7 @@ define([
         type:    recordType,
         id:      recordId,
         columns: [
-          'nextapprover',
+          'custbody_oa_next_approver',
           'approvalstatus',
           'tranid',
           'subsidiary',
@@ -94,7 +94,7 @@ define([
       if (utils.selectValue(fields.approvalstatus) !== C.APPROVAL_STATUS.PENDING) return;
 
       // nextapprover is a SELECT field — extract the scalar value
-      const approverRaw = fields.nextapprover;
+      const approverRaw = fields.custbody_oa_next_approver;
       const approverId  = Array.isArray(approverRaw) && approverRaw[0] ? approverRaw[0].value : null;
       if (!approverId) return;
 

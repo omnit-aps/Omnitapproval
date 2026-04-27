@@ -69,7 +69,7 @@ define([
       fields = search.lookupFields({
         type:    recordType,
         id:      recordId,
-        columns: ['approvalstatus', 'nextapprover', 'tranid', 'subsidiary', 'amount', 'currency']
+        columns: ['approvalstatus', 'custbody_oa_next_approver', 'tranid', 'subsidiary', 'amount', 'currency']
       });
     } catch (e) {
       resp.write(_errorPage('Transaction not found.'));
@@ -92,7 +92,7 @@ define([
     }
 
     // Verify the token's approver still matches the live nextapprover on the record
-    const liveApprover = fields.nextapprover && fields.nextapprover[0] ? String(fields.nextapprover[0].value) : null;
+    const liveApprover = fields.custbody_oa_next_approver && fields.custbody_oa_next_approver[0] ? String(fields.custbody_oa_next_approver[0].value) : null;
     if (liveApprover !== String(approverId)) {
       resp.write(_errorPage('This link is no longer valid — the assigned approver has changed. Please log in to NetSuite.'));
       return;
@@ -178,12 +178,12 @@ define([
       // Verify live state
       let fields;
       try {
-        fields = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['nextapprover', 'approvalstatus'] });
+        fields = search.lookupFields({ type: payload.rt, id: payload.rid, columns: ['custbody_oa_next_approver', 'approvalstatus'] });
       } catch (e) {
         resp.write(_errorPage('Transaction not found or is no longer accessible.'));
         return;
       }
-      const liveApprover = fields.nextapprover && fields.nextapprover[0] ? String(fields.nextapprover[0].value) : null;
+      const liveApprover = fields.custbody_oa_next_approver && fields.custbody_oa_next_approver[0] ? String(fields.custbody_oa_next_approver[0].value) : null;
       if (liveApprover !== String(payload.aid)) {
         resp.write(_errorPage('This link is no longer valid.'));
         return;

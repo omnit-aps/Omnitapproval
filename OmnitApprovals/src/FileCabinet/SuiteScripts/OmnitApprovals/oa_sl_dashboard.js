@@ -117,7 +117,7 @@ define([
 
     // Managers and super approvers see all; others see only their assigned pending records
     if (!isManager && !isSuperApprover) {
-      filters.push('AND', ['nextapprover', 'anyof', [userId]]);
+      filters.push('AND', ['custbody_oa_next_approver', 'anyof', [userId]]);
     }
 
     const rows = [];
@@ -126,7 +126,7 @@ define([
       filters,
       columns: [
         'internalid', 'type', 'tranid', 'entity', 'currency', 'subsidiary',
-        'amount', 'approvalstatus', 'nextapprover',
+        'amount', 'approvalstatus', 'custbody_oa_next_approver',
         C.FIELDS.TRANSACTION.SUBMITTED_BY,
         { name: 'datecreated' }
       ]
@@ -146,8 +146,8 @@ define([
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
         statusClass: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'badge-orange'
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
-        nextApprover:   r.getText('nextapprover') || '—',
-        nextApproverId: r.getValue('nextapprover') || '',
+        nextApprover:   r.getText('custbody_oa_next_approver') || '—',
+        nextApproverId: r.getValue('custbody_oa_next_approver') || '',
         submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY) || '—',
         created:      r.getValue('datecreated')
       });

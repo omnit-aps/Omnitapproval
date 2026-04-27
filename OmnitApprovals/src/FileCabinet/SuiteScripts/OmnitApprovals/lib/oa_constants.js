@@ -74,7 +74,8 @@ define([], () => {
       // custbody fields — may not exist on all record types; all writes wrapped in try/catch
       TRANSACTION: {
         SUBMITTED_BY:   'custbody_oa_submitted_by',
-        HIERARCHY_USED: 'custbody_oa_hierarchy_used'
+        HIERARCHY_USED: 'custbody_oa_hierarchy_used',
+        NEXT_APPROVER:  'custbody_oa_next_approver'
       }
     },
 

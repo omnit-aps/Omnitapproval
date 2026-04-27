@@ -20,10 +20,8 @@ define([
   // No business logic — only a breadcrumb so we can confirm in the Script
   // Execution Log that the deployment is actually bound to the record type.
 
-  // beforeSubmit does the field writeback (approvalstatus + nextapprover + custbody fields)
-  // BEFORE NetSuite's native APPROVALROUTING feature locks the nextapprover field.
-  // afterSubmit doing record.load + setValue + save cannot persist nextapprover when
-  // APPROVALROUTING is enabled — the writes are silently dropped.
+  // beforeSubmit does the field writeback (approvalstatus + custbody_oa_next_approver + custbody fields).
+  // custbody_oa_next_approver is a custom field OA owns, so NS native APPROVALROUTING cannot reset it.
 
   function beforeSubmit(context) {
     log.audit('OA-UE-PROOF BEFORE',
@@ -157,8 +155,9 @@ define([
       return;
     }
 
-    // Write fields on context.newRecord — NetSuite persists these in its own save cycle,
-    // which avoids the APPROVALROUTING lock that drops afterSubmit writes to nextapprover.
+    // Write fields on context.newRecord — persisted in the same save cycle.
+    // custbody_oa_next_approver is a custom field OA owns; it is immune to NS
+    // native APPROVALROUTING which resets the standard nextapprover field post-save.
     try {
       rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
       log.audit('OA-UE-BEFORE setValue ok', { field: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING, recordId });
@@ -166,11 +165,11 @@ define([
       log.audit('OA-UE-BEFORE setValue FAILED', { field: 'approvalstatus', recordId, errorName: e.name, errorMessage: e.message });
     }
     try {
-      rec.setValue({ fieldId: 'nextapprover', value: approver1 });
-      const readback = rec.getValue('nextapprover');
-      log.audit('OA-UE-BEFORE setValue ok', { field: 'nextapprover', attempted: approver1, readback, recordId });
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.NEXT_APPROVER, value: approver1 });
+      const readback = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
+      log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, readback, recordId });
     } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: 'nextapprover', attempted: approver1, recordId, errorName: e.name, errorMessage: e.message });
+      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, recordId, errorName: e.name, errorMessage: e.message });
     }
     try {
       const userId = runtime.getCurrentUser().id;
@@ -196,7 +195,7 @@ define([
   // afterSubmit handles bookkeeping that needs the saved recordId:
   // - audit log row in customrecord_oa_log
   // - schedule MR notification job
-  // The actual field writeback (nextapprover etc.) happens in beforeSubmit.
+  // The actual field writeback (custbody_oa_next_approver etc.) happens in beforeSubmit.
 
   function afterSubmit(context) {
     log.audit('OA-UE-PROOF AFTER',
@@ -241,11 +240,8 @@ define([
       return;
     }
 
-    // Use approvalstatus == PENDING as the routing signal — more reliable than checking
-    // nextapprover directly, because NS native APPROVALROUTING can reset nextapprover to null
-    // after beforeSubmit runs while still leaving approvalstatus as PENDING.
-    const savedStatus     = rec.getValue('approvalstatus');
-    const nextApprover    = rec.getValue('nextapprover');
+    const savedStatus  = rec.getValue('approvalstatus');
+    const nextApprover = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
     log.audit('OA-UE-AFTER saved state', { recordId, savedStatus, nextApprover });
 
     if (savedStatus !== C.APPROVAL_STATUS.PENDING) {
@@ -253,17 +249,16 @@ define([
       return;
     }
 
-    // For EDIT: skip if approvalstatus is unchanged AND nextapprover is unchanged — means
-    // beforeSubmit did not re-route (threshold not exceeded or no threshold configured).
+    // For EDIT: skip if approvalstatus is unchanged AND next approver is unchanged.
     if (context.type === TRIGGER.EDIT) {
       let oldNextApprover, oldStatus;
-      try { oldNextApprover = context.oldRecord.getValue('nextapprover'); } catch (e) { oldNextApprover = null; }
+      try { oldNextApprover = context.oldRecord.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER); } catch (e) { oldNextApprover = null; }
       try { oldStatus       = context.oldRecord.getValue('approvalstatus'); } catch (e) { oldStatus = null; }
       const nextApproverUnchanged = String(oldNextApprover || '') === String(nextApprover || '');
       const statusUnchanged       = String(oldStatus || '') === String(savedStatus || '');
       log.audit('OA-UE-AFTER EDIT comparison', { recordId, oldStatus, savedStatus, oldNextApprover, nextApprover, nextApproverUnchanged, statusUnchanged });
       if (nextApproverUnchanged && statusUnchanged) {
-        log.audit('OA-UE-AFTER skip', { reason: 'EDIT: nextapprover and approvalstatus unchanged — beforeSubmit did not re-route', recordId });
+        log.audit('OA-UE-AFTER skip', { reason: 'EDIT: next approver and approvalstatus unchanged — beforeSubmit did not re-route', recordId });
         return;
       }
     }
@@ -346,7 +341,7 @@ define([
                                : status === C.APPROVAL_STATUS.APPROVED ? 'Approved'
                                : status === C.APPROVAL_STATUS.REJECTED ? 'Rejected' : '—';
 
-      const nextApproverId = rec.getValue('nextapprover');
+      const nextApproverId = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
       let nextApproverName = '—';
       if (nextApproverId) {
         try {
@@ -399,8 +394,7 @@ define([
 
     if (status !== C.APPROVAL_STATUS.PENDING) return;
 
-    // nextapprover is the native NetSuite field — works on both PO and VB
-    const currentApprover   = rec.getValue('nextapprover');
+    const currentApprover   = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
     const isCurrentApprover = currentApprover && String(currentApprover) === String(userId);
     const canDelegate       = utils.parseBool(utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.CAN_DELEGATE));
     const isManager         = utils.parseBool(utils.lookupEmployeeField(userId, C.FIELDS.EMPLOYEE.IS_MANAGER));
