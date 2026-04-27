@@ -34,7 +34,7 @@
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_mr_notifications">
       <title>OA - Email Notifications</title>
-      <status>RELEASED</status>
+      <status>NOTSCHEDULED</status>
       <isdeployed>T</isdeployed>
       <loglevel>DEBUG</loglevel>
     </scriptdeployment>
