@@ -31,7 +31,8 @@ define([], () => {
         EMAIL_INTRO:            'custrecord_oa_email_intro',
         APPROVE_WITHOUT_LOGIN:    'custrecord_oa_approve_without_login',
       RESUBMIT_THRESHOLD_PCT:   'custrecord_oas_resubmit_threshold_pct',
-      RESUBMIT_THRESHOLD_ABS:   'custrecord_oas_resubmit_threshold_abs'
+      RESUBMIT_THRESHOLD_ABS:   'custrecord_oas_resubmit_threshold_abs',
+      HMAC_SECRET:              'custrecord_oa_hmac_secret'
       },
       HIERARCHY: {
         SETTINGS:     'custrecord_oah_settings',

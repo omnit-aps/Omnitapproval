@@ -15,7 +15,10 @@ define([
 ], (record, runtime, search, url, C, utils, tpl, engine) => {
   'use strict';
 
-  utils.setHmacSecret(runtime.getCurrentScript().getParameter({ name: 'custscript_oa_ea_hmac_secret' }));
+  // Script-parameter secret is a fallback. Preferred source is custrecord_oa_hmac_secret on the
+  // subsidiary settings record — resolved per-request in handleGet/handlePost before token verify.
+  const SCRIPT_PARAM_SECRET = runtime.getCurrentScript().getParameter({ name: 'custscript_oa_ea_hmac_secret' }) || '';
+  utils.setHmacSecret(SCRIPT_PARAM_SECRET);
 
   function onRequest(context) {
     const req  = context.request;
@@ -34,6 +37,19 @@ define([
     if (!token || !action) {
       resp.write(_errorPage('Invalid request. Please use the link from your approval email.'));
       return;
+    }
+
+    // Parse token body WITHOUT verifying so we can look up the subsidiary settings
+    // record and use its HMAC secret before verification — eliminates the need for
+    // custscript_oa_mr_hmac_secret and custscript_oa_ea_hmac_secret to be identical.
+    const unverified = utils.parseHmacTokenBody(token);
+    if (unverified) {
+      try {
+        const f     = search.lookupFields({ type: unverified.rt, id: unverified.rid, columns: ['subsidiary'] });
+        const subId = f.subsidiary && f.subsidiary[0] ? f.subsidiary[0].value : null;
+        const s     = subId ? engine.getSettingsForSubsidiary(subId) : null;
+        if (s && s.hmac_secret) utils.setHmacSecret(s.hmac_secret);
+      } catch (e) { /* graceful — fall back to SCRIPT_PARAM_SECRET already set */ }
     }
 
     // Verify HMAC token — contains recordType, recordId, step, approverId, expiry
@@ -125,6 +141,17 @@ define([
       if (!comment || !comment.trim()) {
         resp.write(_errorPage('A reason for rejection is required.'));
         return;
+      }
+
+      // Same subsidiary-secret lookup as GET flow before token verification
+      const unverifiedPost = utils.parseHmacTokenBody(token);
+      if (unverifiedPost) {
+        try {
+          const f     = search.lookupFields({ type: unverifiedPost.rt, id: unverifiedPost.rid, columns: ['subsidiary'] });
+          const subId = f.subsidiary && f.subsidiary[0] ? f.subsidiary[0].value : null;
+          const s     = subId ? engine.getSettingsForSubsidiary(subId) : null;
+          if (s && s.hmac_secret) utils.setHmacSecret(s.hmac_secret);
+        } catch (e) { /* graceful fallback */ }
       }
 
       const payload = utils.verifyHmacToken(token);

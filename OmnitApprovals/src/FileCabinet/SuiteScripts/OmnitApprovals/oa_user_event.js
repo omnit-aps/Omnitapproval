@@ -79,6 +79,14 @@ define([
       } catch (e) {
         log.error('OA-UE-BEFORE: OA log history check failed', e.message);
       }
+
+      if (!hasOaHistory) {
+        // EDIT on a record that was never put through OA — do not start a new flow.
+        // Only CREATE, or EDIT on a previously-managed record (history exists), should trigger routing.
+        log.audit('OA-UE-BEFORE skip', { reason: 'EDIT with no OA history — not a managed record', recordId });
+        return;
+      }
+
       if (hasOaHistory) {
         const currentStatus = rec.getValue('approvalstatus');
 
@@ -258,9 +266,8 @@ define([
 
     try {
       task.create({
-        taskType:    task.TaskType.MAP_REDUCE,
-        scriptId:    'customscript_oa_mr_notifications',
-        deploymentId: 'customdeploy_oa_mr_notifications',
+        taskType: task.TaskType.MAP_REDUCE,
+        scriptId: 'customscript_oa_mr_notifications',
         params: {
           custscript_oa_mr_record_id:   recordId,
           custscript_oa_mr_record_type: recordType
@@ -298,7 +305,7 @@ define([
     }
 
     const form   = context.form;
-    form.clientScriptModulePath = './oa_client_script';
+    form.clientScriptModulePath = '/SuiteScripts/OmnitApprovals/oa_client_script.js';
     const userId = runtime.getCurrentUser().id;
     const status = rec.getValue('approvalstatus');
 

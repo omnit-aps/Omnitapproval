@@ -57,6 +57,20 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
   }
 
   /**
+   * Decode token body without verifying the signature — use only to extract record
+   * info (rt, rid) so the caller can look up the subsidiary-specific HMAC secret
+   * and call setHmacSecret() before calling verifyHmacToken().
+   */
+  function parseHmacTokenBody(token) {
+    if (!token) return null;
+    try {
+      const dot = token.lastIndexOf('.');
+      if (dot < 0) return null;
+      return JSON.parse(_b64urlDecode(token.slice(0, dot)));
+    } catch (e) { return null; }
+  }
+
+  /**
    * Verify a token and return its payload, or null if invalid/expired/unconfigured.
    */
   function verifyHmacToken(token) {
@@ -139,6 +153,7 @@ define(['N/crypto', 'N/runtime', 'N/search', 'N/encode'], (crypto, runtime, sear
     setHmacSecret,
     generateHmacToken,
     verifyHmacToken,
+    parseHmacTokenBody,
     getCurrentUserId,
     getTransactionSubsidiary,
     getTransactionAmount,

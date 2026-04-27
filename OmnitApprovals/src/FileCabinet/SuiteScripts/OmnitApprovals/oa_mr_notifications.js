@@ -19,7 +19,11 @@ define([
   const PARAM_RECORD_ID   = 'custscript_oa_mr_record_id';
   const PARAM_RECORD_TYPE = 'custscript_oa_mr_record_type';
 
-  utils.setHmacSecret(runtime.getCurrentScript().getParameter({ name: 'custscript_oa_mr_hmac_secret' }));
+  // Script-parameter secret is a fallback. Preferred source is custrecord_oa_hmac_secret
+  // on the subsidiary settings record — set per-reduce call so both MR and Email Action
+  // scripts use the same value without requiring identical script-parameter configuration.
+  const SCRIPT_PARAM_SECRET = runtime.getCurrentScript().getParameter({ name: 'custscript_oa_mr_hmac_secret' }) || '';
+  utils.setHmacSecret(SCRIPT_PARAM_SECRET);
 
   function getInputData(inputContext) {
     const script     = runtime.getCurrentScript();
@@ -138,6 +142,15 @@ define([
 
       const settings = subsidiaryId ? engine.getSettingsForSubsidiary(subsidiaryId) : null;
       if (!settings || !utils.parseBool(settings.email_enabled)) return;
+
+      // Prefer settings-record secret so MR and Email Action share the same value
+      // without requiring identical script-parameter configuration on both deployments.
+      const settingsSecret = settings.hmac_secret || '';
+      utils.setHmacSecret(settingsSecret || SCRIPT_PARAM_SECRET);
+      if (!settingsSecret && !SCRIPT_PARAM_SECRET) {
+        log.error('OA MR: email is enabled but no HMAC secret configured — set custrecord_oa_hmac_secret on the settings record', { subsidiaryId, recordId });
+        return;
+      }
 
       const approveLabel = settings.approve_string || 'Approve';
       const declineLabel = settings.reject_string  || 'Reject';

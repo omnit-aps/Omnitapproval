@@ -452,10 +452,11 @@ define([
 
   function _scheduleNotification(recordId, recordType) {
     try {
+      // No deploymentId: let NS pick any available deployment so a busy deployment
+      // does not block notifications queued from concurrent approvals.
       task.create({
-        taskType:    task.TaskType.MAP_REDUCE,
-        scriptId:    'customscript_oa_mr_notifications',
-        deploymentId: 'customdeploy_oa_mr_notifications',
+        taskType: task.TaskType.MAP_REDUCE,
+        scriptId: 'customscript_oa_mr_notifications',
         params: {
           custscript_oa_mr_record_id:   recordId,
           custscript_oa_mr_record_type: recordType

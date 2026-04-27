@@ -105,5 +105,10 @@
       <fieldtype>CURRENCY</fieldtype>
       <ismandatory>F</ismandatory>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_hmac_secret">
+      <label>Email Token Secret (HMAC)</label>
+      <fieldtype>TEXT</fieldtype>
+      <ismandatory>F</ismandatory>
+    </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>

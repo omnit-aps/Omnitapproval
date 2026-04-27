@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<usereventscript scriptid="customscript_oa_ue_settings">
+  <name>OA - Settings Deduplication</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_ue_settings.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyemails></notifyemails>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_ue_settings">
+      <status>RELEASED</status>
+      <recordtype>CUSTOMRECORD_OA_SETTINGS</recordtype>
+      <allemployees>T</allemployees>
+      <allpartners>F</allpartners>
+      <allroles>T</allroles>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+    </scriptdeployment>
+  </scriptdeployments>
+</usereventscript>
