@@ -9,7 +9,7 @@
   <scriptdeployments>
     <scriptdeployment scriptid="customdeploy_oa_ue_settings">
       <status>RELEASED</status>
-      <recordtype>CUSTOMRECORD_OA_SETTINGS</recordtype>
+      <recordtype>customrecord_oa_settings</recordtype>
       <allemployees>T</allemployees>
       <allpartners>F</allpartners>
       <allroles>T</allroles>

@@ -8,7 +8,7 @@
   <scriptcustomfields>
     <scriptcustomfield scriptid="custscript_oa_ea_hmac_secret">
       <label>HMAC Token Secret</label>
-      <fieldtype>LONGTEXT</fieldtype>
+      <fieldtype>TEXT</fieldtype>
       <accesslevel>2</accesslevel>
       <displaytype>NORMAL</displaytype>
       <ismandatory>F</ismandatory>
