@@ -159,12 +159,36 @@ define([
 
     // Write fields on context.newRecord — NetSuite persists these in its own save cycle,
     // which avoids the APPROVALROUTING lock that drops afterSubmit writes to nextapprover.
-    rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
-    try { rec.setValue({ fieldId: 'nextapprover', value: approver1 }); } catch (e) { log.debug('OA: nextapprover not supported', recordType); }
-    try { rec.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: runtime.getCurrentUser().id }); } catch (e) {}
-    try { if (hierarchyId) rec.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId }); } catch (e) {}
+    try {
+      rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
+      log.audit('OA-UE-BEFORE setValue ok', { field: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING, recordId });
+    } catch (e) {
+      log.audit('OA-UE-BEFORE setValue FAILED', { field: 'approvalstatus', recordId, errorName: e.name, errorMessage: e.message });
+    }
+    try {
+      rec.setValue({ fieldId: 'nextapprover', value: approver1 });
+      const readback = rec.getValue('nextapprover');
+      log.audit('OA-UE-BEFORE setValue ok', { field: 'nextapprover', attempted: approver1, readback, recordId });
+    } catch (e) {
+      log.audit('OA-UE-BEFORE setValue FAILED', { field: 'nextapprover', attempted: approver1, recordId, errorName: e.name, errorMessage: e.message });
+    }
+    try {
+      const userId = runtime.getCurrentUser().id;
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId });
+      log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId, recordId });
+    } catch (e) {
+      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, recordId, errorName: e.name, errorMessage: e.message });
+    }
+    try {
+      if (hierarchyId) {
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId });
+        log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId, recordId });
+      }
+    } catch (e) {
+      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, recordId, errorName: e.name, errorMessage: e.message });
+    }
 
-    log.audit('OA-UE-BEFORE writeback set', { recordId, recordType, approver1, hierarchyId, amount });
+    log.audit('OA-UE-BEFORE writeback complete', { recordId, recordType, approver1, hierarchyId, amount });
   }
 
   // ─── afterSubmit ─────────────────────────────────────────────────────────────
@@ -217,32 +241,34 @@ define([
       return;
     }
 
-    // The saved record carries the writes from beforeSubmit. If nextapprover is set,
-    // we know beforeSubmit successfully routed and we should create the audit log + schedule MR.
-    // If not, beforeSubmit either skipped (already routed, no settings, etc.) or the writeback
-    // was somehow blocked — either way nothing to do here.
-    const nextApprover = rec.getValue('nextapprover');
-    if (!nextApprover) {
-      log.audit('OA-UE-AFTER skip', { reason: 'no nextapprover on record (beforeSubmit did not route)', recordId, recordType });
+    // Use approvalstatus == PENDING as the routing signal — more reliable than checking
+    // nextapprover directly, because NS native APPROVALROUTING can reset nextapprover to null
+    // after beforeSubmit runs while still leaving approvalstatus as PENDING.
+    const savedStatus     = rec.getValue('approvalstatus');
+    const nextApprover    = rec.getValue('nextapprover');
+    log.audit('OA-UE-AFTER saved state', { recordId, savedStatus, nextApprover });
+
+    if (savedStatus !== C.APPROVAL_STATUS.PENDING) {
+      log.audit('OA-UE-AFTER skip', { reason: 'approvalstatus is not PENDING on saved record — beforeSubmit did not route', savedStatus, recordId, recordType });
       return;
     }
 
-    // For EDIT: skip if both nextapprover AND approvalstatus are unchanged — means beforeSubmit
-    // did not re-route (threshold not exceeded or no threshold configured). We must check both
-    // because a re-route to the same approver (APPROVED→PENDING) only changes approvalstatus.
+    // For EDIT: skip if approvalstatus is unchanged AND nextapprover is unchanged — means
+    // beforeSubmit did not re-route (threshold not exceeded or no threshold configured).
     if (context.type === TRIGGER.EDIT) {
       let oldNextApprover, oldStatus;
       try { oldNextApprover = context.oldRecord.getValue('nextapprover'); } catch (e) { oldNextApprover = null; }
       try { oldStatus       = context.oldRecord.getValue('approvalstatus'); } catch (e) { oldStatus = null; }
       const nextApproverUnchanged = String(oldNextApprover || '') === String(nextApprover || '');
-      const statusUnchanged       = String(oldStatus || '') === String(rec.getValue('approvalstatus') || '');
+      const statusUnchanged       = String(oldStatus || '') === String(savedStatus || '');
+      log.audit('OA-UE-AFTER EDIT comparison', { recordId, oldStatus, savedStatus, oldNextApprover, nextApprover, nextApproverUnchanged, statusUnchanged });
       if (nextApproverUnchanged && statusUnchanged) {
         log.audit('OA-UE-AFTER skip', { reason: 'EDIT: nextapprover and approvalstatus unchanged — beforeSubmit did not re-route', recordId });
         return;
       }
     }
 
-    log.audit('OA-UE-AFTER bookkeeping', { recordId, recordType, nextApprover });
+    log.audit('OA-UE-AFTER bookkeeping', { recordId, recordType, savedStatus, nextApprover });
 
     // Determine whether this is an initial submission or a threshold-triggered re-submission
     let isResubmission = false;

@@ -445,8 +445,10 @@ define([
   function _setNextApprover(txn, employeeId) {
     try {
       txn.setValue({ fieldId: 'nextapprover', value: employeeId });
+      const readback = txn.getValue('nextapprover');
+      log.audit('OA-ENGINE _setNextApprover ok', { attempted: employeeId, readback, recordType: txn.type, recordId: txn.id });
     } catch (e) {
-      log.debug('OA: nextapprover not supported on this record type', txn.type);
+      log.audit('OA-ENGINE _setNextApprover FAILED', { attempted: employeeId, recordType: txn.type, recordId: txn.id, errorName: e.name, errorMessage: e.message });
     }
   }
 
