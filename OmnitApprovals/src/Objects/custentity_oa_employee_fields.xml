@@ -3,7 +3,6 @@
   <label>OA Internal Reference</label>
   <fieldtype>TEXT</fieldtype>
   <appliestoemployee>T</appliestoemployee>
-  <appliestoperson>F</appliestoperson>
   <appliestocontact>F</appliestocontact>
   <appliestocustomer>F</appliestocustomer>
   <appliestopartner>F</appliestopartner>

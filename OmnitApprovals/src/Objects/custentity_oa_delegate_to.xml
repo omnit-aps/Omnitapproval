@@ -4,7 +4,6 @@
   <fieldtype>SELECT</fieldtype>
   <selectrecordtype>-4</selectrecordtype>
   <appliestoemployee>T</appliestoemployee>
-  <appliestoperson>F</appliestoperson>
   <appliestocontact>F</appliestocontact>
   <appliestocustomer>F</appliestocustomer>
   <appliestopartner>F</appliestopartner>

@@ -3,7 +3,6 @@
   <label>Approve via Email</label>
   <fieldtype>CHECKBOX</fieldtype>
   <appliestoemployee>T</appliestoemployee>
-  <appliestoperson>F</appliestoperson>
   <appliestocontact>F</appliestocontact>
   <appliestocustomer>F</appliestocustomer>
   <appliestopartner>F</appliestopartner>
