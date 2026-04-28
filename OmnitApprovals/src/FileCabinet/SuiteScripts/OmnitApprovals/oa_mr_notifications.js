@@ -45,7 +45,9 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        ['custbody_oa_next_approver', 'noneof', ['@NONE@']]
+        ['custbody_oa_next_approver', 'noneof', ['@NONE@']],
+        'AND',
+        [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'noneof', ['@NONE@']]
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
@@ -150,6 +152,9 @@ define([
       if (!settingsSecret && !SCRIPT_PARAM_SECRET) {
         log.error('OA MR: email is enabled but no HMAC secret configured — set custrecord_oa_hmac_secret on the settings record', { subsidiaryId, recordId });
         return;
+      }
+      if (!settingsSecret && SCRIPT_PARAM_SECRET) {
+        log.warn('OA MR: HMAC secret falling back to script parameter — set custrecord_oa_hmac_secret on the settings record for production', { subsidiaryId });
       }
 
       const approveLabel = settings.approve_string || 'Approve';
