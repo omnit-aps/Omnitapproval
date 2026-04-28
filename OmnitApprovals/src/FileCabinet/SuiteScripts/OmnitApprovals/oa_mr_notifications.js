@@ -45,7 +45,7 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        ['custbody_oa_next_approver', 'isnotempty', null]
+        ['custbody_oa_next_approver', 'noneof', ['@NONE@']]
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
