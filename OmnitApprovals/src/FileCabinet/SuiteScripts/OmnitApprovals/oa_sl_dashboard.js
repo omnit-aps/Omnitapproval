@@ -114,7 +114,7 @@ define([
       'AND',
       ['approvalstatus', 'anyof', approvalStatuses],
       'AND',
-      [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'isnotempty', null]
+      [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'noneof', ['@NONE@']]
     ];
 
     // Managers and super approvers see all OA-tagged records; others see only their assigned pending records
