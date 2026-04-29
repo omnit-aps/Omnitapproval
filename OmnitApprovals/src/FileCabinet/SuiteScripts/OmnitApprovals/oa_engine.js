@@ -299,9 +299,18 @@ define([
     const step = _countApprovedLogs(recordId) + 1;
 
     if (!isSuperOverride) {
-      // Normal flow: check if a step-2 approver is needed
-      const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
-      const routing      = routeForApproval(recordType, recordId, subsidiaryId);
+      // Normal flow: check if a step-2 approver is needed.
+      //
+      // FX snapshot policy (H-3): re-route against the SAME amount that was
+      // routed at first submit. If the bill carries a custbody_oa_base_amount,
+      // pass it explicitly so the engine doesn't re-fetch the (possibly stale)
+      // exchange rate from the record. If the snapshot is missing (legacy bills
+      // submitted before this commit) fall back to the engine self-fetch path.
+      const subsidiaryId    = utils.getTransactionSubsidiary(recordType, recordId);
+      const snapshotBase    = parseFloat(txn.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
+      const routing         = (snapshotBase > 0)
+        ? routeForApproval(recordType, recordId, subsidiaryId, snapshotBase)
+        : routeForApproval(recordType, recordId, subsidiaryId);
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
         _setNextApprover(txn, routing.approver2);

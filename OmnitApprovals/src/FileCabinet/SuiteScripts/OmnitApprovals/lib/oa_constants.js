@@ -76,7 +76,9 @@ define([], () => {
       TRANSACTION: {
         SUBMITTED_BY:   'custbody_oa_submitted_by',
         HIERARCHY_USED: 'custbody_oa_hierarchy_used',
-        NEXT_APPROVER:  'custbody_oa_next_approver'
+        NEXT_APPROVER:  'custbody_oa_next_approver',
+        BASE_AMOUNT:    'custbody_oa_base_amount',
+        FX_SNAPSHOT:    'custbody_oa_fx_snapshot'
       }
     },
 

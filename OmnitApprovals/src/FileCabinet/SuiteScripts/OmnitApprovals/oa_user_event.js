@@ -138,8 +138,24 @@ define([
     // Read amount directly from the record being submitted (recordId may be null on CREATE).
     // Convert to subsidiary base currency — approval matrix thresholds are in base currency,
     // so a 100,000 EUR PO must compare against base-currency thresholds, not the foreign 100,000.
-    const foreignAmount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
-    const amount        = utils.toBaseCurrency(rec, foreignAmount);
+    //
+    // FX snapshot policy (H-3): on the FIRST submit, freeze the base-currency amount
+    // and the exchange-rate used so that every subsequent approval-step decision
+    // (advance to step 2, super-approve, reset, reassign) operates on the SAME
+    // amount we routed against. Re-reading rec.getValue('exchangerate') later in
+    // the flow risks pulling a stale or refreshed daily rate from the record and
+    // routing past a threshold the original submission was below.
+    const existingBase = parseFloat(rec.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
+    const existingFx   = parseFloat(rec.getValue(C.FIELDS.TRANSACTION.FX_SNAPSHOT)) || 0;
+    let amount;
+    if (existingBase > 0 && existingFx > 0 && context.type === TRIGGER.EDIT) {
+      amount = existingBase;
+      log.audit('OA-UE-BEFORE FX snapshot reused', { recordId, base: existingBase, fx: existingFx });
+    } else {
+      const foreignAmount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+      amount              = utils.toBaseCurrency(rec, foreignAmount);
+      log.audit('OA-UE-BEFORE FX snapshot fresh', { recordId, foreignAmount, base: amount });
+    }
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
@@ -206,6 +222,22 @@ define([
     // persisted so audit can later prove which hierarchy approved this bill.
     if (hierarchyId) {
       _setOrThrow(C.FIELDS.TRANSACTION.HIERARCHY_USED, hierarchyId, 'OA_WRITE_HIERARCHY_USED_FAILED');
+    }
+
+    // Persist the FX snapshot ONLY on the first routed submit (existingBase==0).
+    // Re-routes (REJECTED -> resubmit, threshold-triggered re-route on APPROVED
+    // edit) intentionally take a fresh snapshot because the bill is being routed
+    // afresh against the new amount. In-flight PENDING edits are blocked
+    // earlier, so we never overwrite a snapshot mid-approval.
+    if (!(existingBase > 0)) {
+      const fxRate = parseFloat(rec.getValue('exchangerate')) || 1;
+      try {
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.BASE_AMOUNT, value: amount });
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.FX_SNAPSHOT, value: fxRate });
+        log.audit('OA-UE-BEFORE FX snapshot persisted', { recordId, base: amount, fx: fxRate });
+      } catch (e) {
+        log.audit('OA-UE-BEFORE FX snapshot write FAILED (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
+      }
     }
 
     log.audit('OA-UE-BEFORE writeback complete', { recordId, recordType, approver1, hierarchyId, amount });
