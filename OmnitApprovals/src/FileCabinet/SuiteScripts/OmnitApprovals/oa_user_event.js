@@ -101,7 +101,13 @@ define([
           //
           // Non-material edits (memo, attachment, line description) leave the
           // approval flow untouched.
-          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'subsidiary'];
+          //
+          // M-2: include both 'entity' and 'vendor' in the field list. NS APIs surface
+          // the vendor reference under different field IDs across SuiteScript versions
+          // and integration shims (CSV import, REST record, SOAP, scripted bundle
+          // events): some give 'entity', some give 'vendor', some give both. Watching
+          // only one alias missed real vendor swaps in a subset of contexts.
+          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'vendor', 'subsidiary'];
           const changed = materialFields.filter(f => {
             const oldV = context.oldRecord ? context.oldRecord.getValue(f) : null;
             const newV = rec.getValue(f);
@@ -202,7 +208,7 @@ define([
         notifyOff: true
       });
     }
-    const { approver1, approver2, hierarchyId } = result;
+    const { approver1, approver2, hierarchyId, routeSource } = result;
     if (!approver1) {
       // Engine returned no approver and didn't surface an error code. Treat as a
       // governance failure: the bill must NOT save in an ungoverned state.
@@ -255,6 +261,17 @@ define([
     // persisted so audit can later prove which hierarchy approved this bill.
     if (hierarchyId) {
       _setOrThrow(C.FIELDS.TRANSACTION.HIERARCHY_USED, hierarchyId, 'OA_WRITE_HIERARCHY_USED_FAILED');
+    }
+
+    // M-1 route_source: written UNCONDITIONALLY on every routed bill, so audit
+    // can answer "why did this go to person X" even on default-routed bills
+    // where hierarchy_used stays null. Best-effort write — if the field doesn't
+    // exist on this transaction type, log and continue rather than block.
+    try {
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.ROUTE_SOURCE, value: routeSource || C.ROUTE_SOURCES.DEFAULT });
+      log.audit('OA-UE-BEFORE route_source written', { recordId, routeSource: routeSource || C.ROUTE_SOURCES.DEFAULT });
+    } catch (e) {
+      log.audit('OA-UE-BEFORE route_source write failed (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
     }
 
     // H-6: persist provenance fields. These are best-effort (non-blocking) because

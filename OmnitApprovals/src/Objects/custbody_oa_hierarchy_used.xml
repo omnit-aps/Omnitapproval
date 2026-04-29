@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <transactionbodycustomfield scriptid="custbody_oa_hierarchy_used">
   <label>OA Hierarchy Used</label>
-  <fieldtype>INTEGER</fieldtype>
+  <fieldtype>SELECT</fieldtype>
+  <selectrecordtype>[scriptid=customrecord_oa_hierarchy]</selectrecordtype>
   <ismandatory>F</ismandatory>
   <displaytype>HIDDEN</displaytype>
   <bodypurchase>T</bodypurchase>
