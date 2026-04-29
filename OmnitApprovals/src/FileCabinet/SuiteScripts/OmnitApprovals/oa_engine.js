@@ -168,6 +168,13 @@ define([
       }
     }
 
+    // Required-fallback policy. If no rule matched (or use_amount=false), fall back
+    // to subsidiary defaults. If defaults are also blank, refuse routing with a
+    // deterministic NO_RULE_MATCH code. The User Event will translate that into a
+    // blocking error and the bill will not save in an ungoverned state. Configuration
+    // mistakes (missing rules + blank defaults) must surface as a save failure, not
+    // as an auto-approved transaction.
+    const ruleMatched = !!approver1;
     if (!approver1) approver1 = settings.default_approver1 || null;
     if (!approver2 && approverCount >= 2) approver2 = settings.default_approver2 || null;
 
@@ -178,10 +185,19 @@ define([
       recordType, recordId, subsidiaryId,
       use_amount: !!settings.use_amount,
       amount, hierarchyId, matchedThresholdId,
+      ruleMatched,
       approver1, approver2, approverCount,
       defaultApprover1: settings.default_approver1,
       defaultApprover2: settings.default_approver2
     });
+
+    if (!approver1) {
+      log.error('OA-ENGINE NO_RULE_MATCH', {
+        recordType, recordId, subsidiaryId, amount, hierarchyId,
+        matchedThresholdId, defaultApprover1: settings.default_approver1
+      });
+      return { error: 'NO_RULE_MATCH', hierarchyId, amount };
+    }
 
     return { approver1, approver2, hierarchyId, approverCount, settings };
   }
