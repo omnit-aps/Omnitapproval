@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transactionbodycustomfield scriptid="custbody_oa_state_version">
+  <label>OA State Version (optimistic concurrency)</label>
+  <fieldtype>INTEGER</fieldtype>
+  <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <defaultvalue>0</defaultvalue>
+  <bodypurchase>T</bodypurchase>
+</transactionbodycustomfield>

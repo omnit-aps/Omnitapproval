@@ -9,11 +9,12 @@ define([
   'N/search',
   'N/task',
   'N/url',
+  'N/error',
   'N/ui/serverWidget',
   './lib/oa_constants',
   './lib/oa_utils',
   './oa_engine'
-], (record, runtime, search, task, url, serverWidget, C, utils, engine) => {
+], (record, runtime, search, task, url, error, serverWidget, C, utils, engine) => {
   'use strict';
 
   // ─── beforeSubmit ────────────────────────────────────────────────────────────
@@ -55,16 +56,12 @@ define([
       return;
     }
 
-    const allowed = [
-      runtime.ContextType.USER_INTERFACE,
-      runtime.ContextType.WEBSERVICES,
-      runtime.ContextType.RESTLET,
-      runtime.ContextType.RESTWEBSERVICES
-    ];
-    if (!allowed.includes(execContext)) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'execContext not in allowed list', execContext, recordId });
-      return;
-    }
+    // Route in every execution context. Live evidence (2026-04-29, td3075893): vendor bills
+    // 93154/93254/93255/93354/93355/93356 created via REST API auto-approved with status=A
+    // because the prior allow-list excluded RESTWEBSERVICES under that account's runtime.
+    // No filter — CSV import, scheduled jobs, RESTlets, REST web services and SOAP all
+    // route through the same governance as UI submissions.
+    log.audit('OA-UE-BEFORE execContext (no filter)', { execContext, recordId });
 
     if (context.type === TRIGGER.EDIT) {
       let hasOaHistory = false;
@@ -94,9 +91,42 @@ define([
           // Fall through to routing below
 
         } else if (currentStatus === C.APPROVAL_STATUS.PENDING) {
-          // UAT rule: PENDING + edit → never re-route (already in-flight)
-          log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on PENDING record — in-flight approval, skip re-routing', recordId });
-          return;
+          // H-4: PENDING + edit → if any *material* field changed, the bill is no
+          // longer the same artefact step 1 was approving. Reset to step 1 and
+          // re-route so the new material does not slip through under an
+          // approver who never saw it. Material fields per UAT:
+          //   - total / amount / usertotal  (the money)
+          //   - vendor / entity              (the counterparty)
+          //   - subsidiary                   (the entity owning the money)
+          //
+          // Non-material edits (memo, attachment, line description) leave the
+          // approval flow untouched.
+          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'subsidiary'];
+          const changed = materialFields.filter(f => {
+            const oldV = context.oldRecord ? context.oldRecord.getValue(f) : null;
+            const newV = rec.getValue(f);
+            return String(oldV || '') !== String(newV || '');
+          });
+
+          if (!changed.length) {
+            log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on PENDING — no material change', recordId });
+            return;
+          }
+
+          log.audit('OA-UE-BEFORE reset to step 1', {
+            reason: 'EDIT on PENDING with material change — re-routing from step 1',
+            recordId, changed
+          });
+
+          // Clear the FX snapshot so the route below recomputes against the new
+          // amount (otherwise the H-3 freeze would keep the old amount in force).
+          try {
+            rec.setValue({ fieldId: C.FIELDS.TRANSACTION.BASE_AMOUNT, value: '' });
+            rec.setValue({ fieldId: C.FIELDS.TRANSACTION.FX_SNAPSHOT, value: '' });
+          } catch (e) { /* best effort — snapshot clear */ }
+          // Fall through to routing below; the audit-log row written by
+          // afterSubmit will be tagged RESUBMITTED because the OA log already has
+          // a SUBMITTED entry for this record.
 
         } else {
           // UAT rule: APPROVED + edit → only re-route if amount change exceeds threshold
@@ -141,50 +171,122 @@ define([
     // Read amount directly from the record being submitted (recordId may be null on CREATE).
     // Convert to subsidiary base currency — approval matrix thresholds are in base currency,
     // so a 100,000 EUR PO must compare against base-currency thresholds, not the foreign 100,000.
-    const foreignAmount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
-    const amount        = utils.toBaseCurrency(rec, foreignAmount);
+    //
+    // FX snapshot policy (H-3): on the FIRST submit, freeze the base-currency amount
+    // and the exchange-rate used so that every subsequent approval-step decision
+    // (advance to step 2, super-approve, reset, reassign) operates on the SAME
+    // amount we routed against. Re-reading rec.getValue('exchangerate') later in
+    // the flow risks pulling a stale or refreshed daily rate from the record and
+    // routing past a threshold the original submission was below.
+    const existingBase = parseFloat(rec.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
+    const existingFx   = parseFloat(rec.getValue(C.FIELDS.TRANSACTION.FX_SNAPSHOT)) || 0;
+    let amount;
+    if (existingBase > 0 && existingFx > 0 && context.type === TRIGGER.EDIT) {
+      amount = existingBase;
+      log.audit('OA-UE-BEFORE FX snapshot reused', { recordId, base: existingBase, fx: existingFx });
+    } else {
+      const foreignAmount = parseFloat(rec.getValue('total') || rec.getValue('usertotal') || rec.getValue('amount') || 0) || 0;
+      amount              = utils.toBaseCurrency(rec, foreignAmount);
+      log.audit('OA-UE-BEFORE FX snapshot fresh', { recordId, foreignAmount, base: amount });
+    }
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'routeForApproval error', recordId, error: result.error });
-      return;
+      // Engine declared a deterministic refusal (NO_SETTINGS, RECORD_TYPE_DISABLED,
+      // NO_RULE_MATCH). Block the save so the bill cannot persist ungoverned.
+      log.error('OA-UE-BEFORE block', { reason: 'routeForApproval error', recordId, recordType, subsidiaryId, error: result.error });
+      throw error.create({
+        name:    'OA_ROUTING_REFUSED',
+        message: 'OmnitApprovals refused to route this transaction: ' + result.error +
+                 '. Configure subsidiary settings or contact your administrator.',
+        notifyOff: true
+      });
     }
-    const { approver1, hierarchyId } = result;
+    const { approver1, approver2, hierarchyId } = result;
     if (!approver1) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'no approver resolved by routeForApproval', recordId, recordType });
-      return;
+      // Engine returned no approver and didn't surface an error code. Treat as a
+      // governance failure: the bill must NOT save in an ungoverned state.
+      log.error('OA-UE-BEFORE block', { reason: 'no approver resolved by routeForApproval', recordId, recordType, subsidiaryId, amount });
+      throw error.create({
+        name:    'OA_NO_APPROVER',
+        message: 'OmnitApprovals could not resolve an approver for this transaction. ' +
+                 'Configure thresholds or a default approver for subsidiary ' + subsidiaryId + '.',
+        notifyOff: true
+      });
     }
 
     // Write fields on context.newRecord — persisted in the same save cycle.
     // custbody_oa_next_approver is a custom field OA owns; it is immune to NS
     // native APPROVALROUTING which resets the standard nextapprover field post-save.
-    try {
-      rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
-      log.audit('OA-UE-BEFORE setValue ok', { field: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING, recordId });
-    } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: 'approvalstatus', recordId, errorName: e.name, errorMessage: e.message });
+    //
+    // Critical writes (approvalstatus, next_approver, hierarchy_used) MUST succeed
+    // or the transaction will save in a half-routed state. We throw so the save is
+    // aborted instead of swallowing the failure into the audit log. Pre-SB-6
+    // versions logged "setValue FAILED" and let the bill save anyway, which is the
+    // exact failure pattern that produced the 6 auto-approved REST bills (SB-0).
+    function _setOrThrow(fieldId, value, code) {
+      try {
+        rec.setValue({ fieldId, value });
+        log.audit('OA-UE-BEFORE setValue ok', { field: fieldId, value, recordId });
+      } catch (e) {
+        log.error('OA-UE-BEFORE setValue FAILED — blocking save', { field: fieldId, attempted: value, recordId, errorName: e.name, errorMessage: e.message });
+        throw error.create({
+          name:    code,
+          message: 'OmnitApprovals could not write ' + fieldId + ' on the record (' + e.message + '). The transaction was not saved.',
+          notifyOff: true
+        });
+      }
     }
-    try {
-      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.NEXT_APPROVER, value: approver1 });
-      const readback = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
-      log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, readback, recordId });
-    } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, recordId, errorName: e.name, errorMessage: e.message });
-    }
+
+    _setOrThrow('approvalstatus',                     C.APPROVAL_STATUS.PENDING, 'OA_WRITE_APPROVALSTATUS_FAILED');
+    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    approver1,                'OA_WRITE_NEXT_APPROVER_FAILED');
+
+    // Submitted-by is informational and may not exist on all transaction types in
+    // every account. Don't block the save if it fails — log and continue.
     try {
       const userId = runtime.getCurrentUser().id;
       rec.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId });
       log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId, recordId });
     } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, recordId, errorName: e.name, errorMessage: e.message });
+      log.audit('OA-UE-BEFORE setValue FAILED (non-blocking)', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, recordId, errorName: e.name, errorMessage: e.message });
     }
+
+    // Hierarchy used is part of governance state — if we resolved one, it must be
+    // persisted so audit can later prove which hierarchy approved this bill.
+    if (hierarchyId) {
+      _setOrThrow(C.FIELDS.TRANSACTION.HIERARCHY_USED, hierarchyId, 'OA_WRITE_HIERARCHY_USED_FAILED');
+    }
+
+    // H-6: persist provenance fields. These are best-effort (non-blocking) because
+    // they're informational — the routing decision itself is already recorded by
+    // approvalstatus + custbody_oa_next_approver + the OA log row. Their value is
+    // post-hoc audit ("who was originally approver 1 even though approver 1 then
+    // delegated to X?"), so a write failure here does not invalidate the flow.
     try {
-      if (hierarchyId) {
-        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId });
-        log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId, recordId });
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 1 });
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,    value: approver1 });
+      if (approver2) {
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2, value: approver2 });
       }
+      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: 1, approver1, approver2 });
     } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, recordId, errorName: e.name, errorMessage: e.message });
+      log.audit('OA-UE-BEFORE provenance write failed (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
+    }
+
+    // Persist the FX snapshot ONLY on the first routed submit (existingBase==0).
+    // Re-routes (REJECTED -> resubmit, threshold-triggered re-route on APPROVED
+    // edit) intentionally take a fresh snapshot because the bill is being routed
+    // afresh against the new amount. In-flight PENDING edits are blocked
+    // earlier, so we never overwrite a snapshot mid-approval.
+    if (!(existingBase > 0)) {
+      const fxRate = parseFloat(rec.getValue('exchangerate')) || 1;
+      try {
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.BASE_AMOUNT, value: amount });
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.FX_SNAPSHOT, value: fxRate });
+        log.audit('OA-UE-BEFORE FX snapshot persisted', { recordId, base: amount, fx: fxRate });
+      } catch (e) {
+        log.audit('OA-UE-BEFORE FX snapshot write FAILED (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
+      }
     }
 
     log.audit('OA-UE-BEFORE writeback complete', { recordId, recordType, approver1, hierarchyId, amount });
@@ -229,16 +331,8 @@ define([
       return;
     }
 
-    const allowed = [
-      runtime.ContextType.USER_INTERFACE,
-      runtime.ContextType.WEBSERVICES,
-      runtime.ContextType.RESTLET,
-      runtime.ContextType.RESTWEBSERVICES
-    ];
-    if (!allowed.includes(execContext)) {
-      log.audit('OA-UE-AFTER skip', { reason: 'execContext not in allowed list', execContext, recordId });
-      return;
-    }
+    // Run in every execution context — see beforeSubmit comment.
+    log.audit('OA-UE-AFTER execContext (no filter)', { execContext, recordId });
 
     const savedStatus  = rec.getValue('approvalstatus');
     const nextApprover = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);

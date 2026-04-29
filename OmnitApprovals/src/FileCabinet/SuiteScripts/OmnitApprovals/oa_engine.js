@@ -114,6 +114,25 @@ define([
     return h;
   }
 
+  // ─── Threshold matching ──────────────────────────────────────────────────────
+  //
+  // Standardized to half-open [min, max): a threshold matches when
+  //   amount >= minAmount  AND  amount < maxAmount
+  //
+  // Inclusive on the lower bound, EXCLUSIVE on the upper. This makes adjacent
+  // thresholds (e.g. 0–500, 500–5000, 5000+) cover the number line exactly once
+  // — no gaps, no double-matches at the boundary. A threshold with no maxAmount
+  // matches up to +Infinity.
+  //
+  // Pre-fix code used inclusive-inclusive [min, max] which caused 500.00 and
+  // 5000.00 to match two adjacent rules simultaneously. With sortOrder
+  // tie-breaking the actual approver was deterministic but the boundary
+  // semantics were ambiguous and produced confusing audit logs.
+
+  function matchThresholds(thresholds, amount) {
+    return (thresholds || []).filter(t => amount >= t.minAmount && amount < t.maxAmount);
+  }
+
   // ─── Delegation ──────────────────────────────────────────────────────────────
 
   function resolveApprover(employeeId) {
@@ -126,6 +145,12 @@ define([
   // ─── Routing ─────────────────────────────────────────────────────────────────
 
   function routeForApproval(recordType, recordId, subsidiaryId, amountOverride) {
+    // arguments.length tells us whether the caller passed amountOverride at all.
+    // An *explicit* `undefined` is a real upstream failure ("I tried to compute it
+    // and got nothing") and must be rejected, not silently re-fetched. A
+    // 3-argument call ("don't have it, look it up") is the route the engine takes
+    // when invoked from processApproval / processDecline / processReassign.
+    const overrideProvided = arguments.length >= 4;
     const settings = getSettingsForSubsidiary(subsidiaryId);
     if (!settings) {
       log.audit('OA-ENGINE routeForApproval', { recordType, recordId, subsidiaryId, error: 'NO_SETTINGS' });
@@ -151,8 +176,32 @@ define([
       const hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
         hierarchyId = hierarchy.id;
-        amount = (typeof amountOverride === 'number') ? amountOverride : utils.getTransactionAmount(recordType, recordId);
-        const matching = hierarchy.thresholds.filter(t => amount >= t.minAmount && amount <= t.maxAmount);
+
+        // No 4th argument -> look it up from the record.
+        // 4th argument provided (even if null/undefined) -> trust the caller and validate.
+        if (!overrideProvided) {
+          amount = utils.getTransactionAmount(recordType, recordId);
+        } else {
+          amount = amountOverride;
+        }
+
+        // Reject inputs that cannot be matched against any band:
+        //   null / undefined  -> caller failed to read total, refuse
+        //   NaN               -> parse failure upstream, refuse
+        //   negative          -> credit notes / reversals — opt-in via
+        //                        custrecord_oa_allow_negative_amount only
+        // Each refusal returns a distinct error code so the UE log makes the
+        // root cause obvious.
+        if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
+          log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
+          return { error: 'INVALID_AMOUNT', amount };
+        }
+        if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
+          log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
+          return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
+        }
+
+        const matching = matchThresholds(hierarchy.thresholds, amount);
 
         let matched = null;
         if (hierarchy.highestOnly) {
@@ -168,6 +217,13 @@ define([
       }
     }
 
+    // Required-fallback policy. If no rule matched (or use_amount=false), fall back
+    // to subsidiary defaults. If defaults are also blank, refuse routing with a
+    // deterministic NO_RULE_MATCH code. The User Event will translate that into a
+    // blocking error and the bill will not save in an ungoverned state. Configuration
+    // mistakes (missing rules + blank defaults) must surface as a save failure, not
+    // as an auto-approved transaction.
+    const ruleMatched = !!approver1;
     if (!approver1) approver1 = settings.default_approver1 || null;
     if (!approver2 && approverCount >= 2) approver2 = settings.default_approver2 || null;
 
@@ -178,12 +234,81 @@ define([
       recordType, recordId, subsidiaryId,
       use_amount: !!settings.use_amount,
       amount, hierarchyId, matchedThresholdId,
+      ruleMatched,
       approver1, approver2, approverCount,
       defaultApprover1: settings.default_approver1,
       defaultApprover2: settings.default_approver2
     });
 
+    if (!approver1) {
+      log.error('OA-ENGINE NO_RULE_MATCH', {
+        recordType, recordId, subsidiaryId, amount, hierarchyId,
+        matchedThresholdId, defaultApprover1: settings.default_approver1
+      });
+      return { error: 'NO_RULE_MATCH', hierarchyId, amount };
+    }
+
     return { approver1, approver2, hierarchyId, approverCount, settings };
+  }
+
+  // ─── Optimistic concurrency ──────────────────────────────────────────────────
+  //
+  // Two approvers loading the same bill, both clicking Approve at roughly the
+  // same moment, both posting through the same RESTlet — pre-fix code happily
+  // wrote both transitions and produced two APPROVED audit rows for one bill.
+  // Worse, in step-2 flows you could land in step 2 then step 2 again instead
+  // of step 1 -> step 2.
+  //
+  // Each protected transition (approve, decline, reset, reassign, delegate)
+  // now goes through _concurrencyCheckAndBump:
+  //   1. Capture loadedVersion = txn.getValue('custbody_oa_state_version').
+  //   2. Apply business changes to txn.
+  //   3. Re-read the *persisted* version with lookupFields. If it doesn't
+  //      match loadedVersion, another transition slipped in — abort with
+  //      OA_CONCURRENT_UPDATE so the caller can retry from a fresh load.
+  //   4. Set version = loadedVersion + 1, save.
+  //
+  // This is not atomic (NS has no CAS). The check-then-save window is small
+  // (one record save), but two writers timing within that window could both
+  // pass. We accept that residual risk and surface OA_CONCURRENT_UPDATE in
+  // the much more common case of a few seconds of skew.
+
+  function _readLoadedVersion(txn) {
+    const v = parseInt(txn.getValue(C.FIELDS.TRANSACTION.STATE_VERSION), 10);
+    return isNaN(v) ? 0 : v;
+  }
+
+  function _readPersistedVersion(recordType, recordId) {
+    try {
+      const r = search.lookupFields({
+        type:    recordType,
+        id:      recordId,
+        columns: [C.FIELDS.TRANSACTION.STATE_VERSION]
+      });
+      const raw = r[C.FIELDS.TRANSACTION.STATE_VERSION];
+      const v   = parseInt(Array.isArray(raw) ? (raw[0] && raw[0].value) : raw, 10);
+      return isNaN(v) ? 0 : v;
+    } catch (e) {
+      log.error('OA-ENGINE concurrency lookup failed', { recordType, recordId, err: e.message });
+      return null;
+    }
+  }
+
+  // Returns { ok: true, newVersion } on success, { ok: false, message } on conflict.
+  function _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion) {
+    const persisted = _readPersistedVersion(recordType, recordId);
+    if (persisted === null) {
+      // Lookup failed — fall through and let the save itself fail loudly.
+      return { ok: true, newVersion: loadedVersion + 1 };
+    }
+    if (persisted !== loadedVersion) {
+      log.error('OA-ENGINE OA_CONCURRENT_UPDATE', {
+        recordType, recordId, loadedVersion, persisted
+      });
+      return { ok: false, message: 'OA_CONCURRENT_UPDATE: another approver acted on this transaction. Reload and try again.' };
+    }
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.STATE_VERSION, value: loadedVersion + 1 });
+    return { ok: true, newVersion: loadedVersion + 1 };
   }
 
   // ─── Step helper ─────────────────────────────────────────────────────────────
@@ -231,15 +356,32 @@ define([
       }
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step           = _countApprovedLogs(recordId) + 1;
+    const loadedVersion  = _readLoadedVersion(txn);
 
     if (!isSuperOverride) {
-      // Normal flow: check if a step-2 approver is needed
-      const subsidiaryId = utils.getTransactionSubsidiary(recordType, recordId);
-      const routing      = routeForApproval(recordType, recordId, subsidiaryId);
+      // Normal flow: check if a step-2 approver is needed.
+      //
+      // FX snapshot policy (H-3): re-route against the SAME amount that was
+      // routed at first submit. If the bill carries a custbody_oa_base_amount,
+      // pass it explicitly so the engine doesn't re-fetch the (possibly stale)
+      // exchange rate from the record. If the snapshot is missing (legacy bills
+      // submitted before this commit) fall back to the engine self-fetch path.
+      const subsidiaryId    = utils.getTransactionSubsidiary(recordType, recordId);
+      const snapshotBase    = parseFloat(txn.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
+      const routing         = (snapshotBase > 0)
+        ? routeForApproval(recordType, recordId, subsidiaryId, snapshotBase)
+        : routeForApproval(recordType, recordId, subsidiaryId);
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
         _setNextApprover(txn, routing.approver2);
+        // H-6: bump current_step provenance so observers (UI tab, MR notifications,
+        // SuiteAnalytics queries) can tell which step this bill is on.
+        try {
+          txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 2 });
+        } catch (e) { /* informational; do not block */ }
+        const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+        if (!guard.ok) return { success: false, message: guard.message };
         try {
           txn.save({ ignoreMandatoryFields: true });
         } catch (e) {
@@ -255,6 +397,8 @@ define([
     // Final approval (normal or super override)
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
     _setNextApprover(txn, null);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -294,10 +438,13 @@ define([
       }
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
 
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.REJECTED });
     _setNextApprover(txn, null);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -332,8 +479,11 @@ define([
       return { success: false, message: 'Transaction is not pending approval.' };
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
     _setNextApprover(txn, targetId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -361,8 +511,11 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
+    const loadedVersion = _readLoadedVersion(txn);
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
     _setNextApprover(txn, newApproverId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -395,8 +548,11 @@ define([
       return { success: false, message: 'Transaction is not pending — cannot reassign.' };
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
     _setNextApprover(txn, newApproverId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -479,6 +635,7 @@ define([
     processDelegation,
     processReset,
     processReassign,
-    createAuditLog
+    createAuditLog,
+    matchThresholds
   };
 });

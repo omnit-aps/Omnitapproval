@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transactionbodycustomfield scriptid="custbody_oa_token_created">
+  <label>OA Approval Token Created</label>
+  <fieldtype>DATETIME</fieldtype>
+  <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <bodypurchase>T</bodypurchase>
+</transactionbodycustomfield>
