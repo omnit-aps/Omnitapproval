@@ -55,16 +55,12 @@ define([
       return;
     }
 
-    const allowed = [
-      runtime.ContextType.USER_INTERFACE,
-      runtime.ContextType.WEBSERVICES,
-      runtime.ContextType.RESTLET,
-      runtime.ContextType.RESTWEBSERVICES
-    ];
-    if (!allowed.includes(execContext)) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'execContext not in allowed list', execContext, recordId });
-      return;
-    }
+    // Route in every execution context. Live evidence (2026-04-29, td3075893): vendor bills
+    // 93154/93254/93255/93354/93355/93356 created via REST API auto-approved with status=A
+    // because the prior allow-list excluded RESTWEBSERVICES under that account's runtime.
+    // No filter — CSV import, scheduled jobs, RESTlets, REST web services and SOAP all
+    // route through the same governance as UI submissions.
+    log.audit('OA-UE-BEFORE execContext (no filter)', { execContext, recordId });
 
     if (context.type === TRIGGER.EDIT) {
       let hasOaHistory = false;
@@ -229,16 +225,8 @@ define([
       return;
     }
 
-    const allowed = [
-      runtime.ContextType.USER_INTERFACE,
-      runtime.ContextType.WEBSERVICES,
-      runtime.ContextType.RESTLET,
-      runtime.ContextType.RESTWEBSERVICES
-    ];
-    if (!allowed.includes(execContext)) {
-      log.audit('OA-UE-AFTER skip', { reason: 'execContext not in allowed list', execContext, recordId });
-      return;
-    }
+    // Run in every execution context — see beforeSubmit comment.
+    log.audit('OA-UE-AFTER execContext (no filter)', { execContext, recordId });
 
     const savedStatus  = rec.getValue('approvalstatus');
     const nextApprover = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
