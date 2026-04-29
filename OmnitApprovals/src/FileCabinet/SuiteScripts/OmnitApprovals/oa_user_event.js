@@ -9,11 +9,12 @@ define([
   'N/search',
   'N/task',
   'N/url',
+  'N/error',
   'N/ui/serverWidget',
   './lib/oa_constants',
   './lib/oa_utils',
   './oa_engine'
-], (record, runtime, search, task, url, serverWidget, C, utils, engine) => {
+], (record, runtime, search, task, url, error, serverWidget, C, utils, engine) => {
   'use strict';
 
   // ─── beforeSubmit ────────────────────────────────────────────────────────────
@@ -142,13 +143,27 @@ define([
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'routeForApproval error', recordId, error: result.error });
-      return;
+      // Engine declared a deterministic refusal (NO_SETTINGS, RECORD_TYPE_DISABLED,
+      // NO_RULE_MATCH). Block the save so the bill cannot persist ungoverned.
+      log.error('OA-UE-BEFORE block', { reason: 'routeForApproval error', recordId, recordType, subsidiaryId, error: result.error });
+      throw error.create({
+        name:    'OA_ROUTING_REFUSED',
+        message: 'OmnitApprovals refused to route this transaction: ' + result.error +
+                 '. Configure subsidiary settings or contact your administrator.',
+        notifyOff: true
+      });
     }
     const { approver1, hierarchyId } = result;
     if (!approver1) {
-      log.audit('OA-UE-BEFORE skip', { reason: 'no approver resolved by routeForApproval', recordId, recordType });
-      return;
+      // Engine returned no approver and didn't surface an error code. Treat as a
+      // governance failure: the bill must NOT save in an ungoverned state.
+      log.error('OA-UE-BEFORE block', { reason: 'no approver resolved by routeForApproval', recordId, recordType, subsidiaryId, amount });
+      throw error.create({
+        name:    'OA_NO_APPROVER',
+        message: 'OmnitApprovals could not resolve an approver for this transaction. ' +
+                 'Configure thresholds or a default approver for subsidiary ' + subsidiaryId + '.',
+        notifyOff: true
+      });
     }
 
     // Write fields on context.newRecord — persisted in the same save cycle.

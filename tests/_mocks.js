@@ -99,6 +99,14 @@ const CRYPTO_MOCK = {
   }
 };
 
+const ERROR_MOCK = {
+  create: ({ name, message }) => {
+    const e = new Error(message);
+    e.name = name || 'Error';
+    return e;
+  }
+};
+
 const ENCODE_MOCK = {
   Encoding: { UTF_8: 'UTF_8', BASE_64: 'BASE_64' },
   convert: ({ string, inputEncoding, outputEncoding }) => {
@@ -121,5 +129,6 @@ module.exports = {
   URL_MOCK,
   SERVERWIDGET_MOCK,
   CRYPTO_MOCK,
-  ENCODE_MOCK
+  ENCODE_MOCK,
+  ERROR_MOCK
 };

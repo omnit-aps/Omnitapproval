@@ -21,7 +21,8 @@ const { makeRuntimeMock,
         URL_MOCK,
         SERVERWIDGET_MOCK,
         CRYPTO_MOCK,
-        ENCODE_MOCK }              = require('../_mocks');
+        ENCODE_MOCK,
+        ERROR_MOCK }               = require('../_mocks');
 
 const UE_PATH = 'OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_user_event.js';
 
@@ -47,6 +48,7 @@ function buildUE(execContext, engineStub) {
     'N/search':           searchMock,
     'N/task':             TASK_MOCK,
     'N/url':              URL_MOCK,
+    'N/error':            ERROR_MOCK,
     'N/ui/serverWidget':  SERVERWIDGET_MOCK,
     'N/crypto':           CRYPTO_MOCK,
     'N/encode':           ENCODE_MOCK,
