@@ -145,6 +145,12 @@ define([
   // ─── Routing ─────────────────────────────────────────────────────────────────
 
   function routeForApproval(recordType, recordId, subsidiaryId, amountOverride) {
+    // arguments.length tells us whether the caller passed amountOverride at all.
+    // An *explicit* `undefined` is a real upstream failure ("I tried to compute it
+    // and got nothing") and must be rejected, not silently re-fetched. A
+    // 3-argument call ("don't have it, look it up") is the route the engine takes
+    // when invoked from processApproval / processDecline / processReassign.
+    const overrideProvided = arguments.length >= 4;
     const settings = getSettingsForSubsidiary(subsidiaryId);
     if (!settings) {
       log.audit('OA-ENGINE routeForApproval', { recordType, recordId, subsidiaryId, error: 'NO_SETTINGS' });
@@ -170,7 +176,31 @@ define([
       const hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
         hierarchyId = hierarchy.id;
-        amount = (typeof amountOverride === 'number') ? amountOverride : utils.getTransactionAmount(recordType, recordId);
+
+        // No 4th argument -> look it up from the record.
+        // 4th argument provided (even if null/undefined) -> trust the caller and validate.
+        if (!overrideProvided) {
+          amount = utils.getTransactionAmount(recordType, recordId);
+        } else {
+          amount = amountOverride;
+        }
+
+        // Reject inputs that cannot be matched against any band:
+        //   null / undefined  -> caller failed to read total, refuse
+        //   NaN               -> parse failure upstream, refuse
+        //   negative          -> credit notes / reversals — opt-in via
+        //                        custrecord_oa_allow_negative_amount only
+        // Each refusal returns a distinct error code so the UE log makes the
+        // root cause obvious.
+        if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
+          log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
+          return { error: 'INVALID_AMOUNT', amount };
+        }
+        if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
+          log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
+          return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
+        }
+
         const matching = matchThresholds(hierarchy.thresholds, amount);
 
         let matched = null;

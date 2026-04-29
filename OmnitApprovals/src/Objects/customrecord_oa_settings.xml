@@ -110,5 +110,11 @@
       <fieldtype>TEXT</fieldtype>
       <ismandatory>F</ismandatory>
     </customrecordcustomfield>
+    <customrecordcustomfield scriptid="custrecord_oa_allow_negative_amount">
+      <label>Allow Negative Amount (Credit Notes)</label>
+      <fieldtype>CHECKBOX</fieldtype>
+      <ismandatory>F</ismandatory>
+      <defaultchecked>F</defaultchecked>
+    </customrecordcustomfield>
   </customrecordcustomfields>
 </customrecordtype>

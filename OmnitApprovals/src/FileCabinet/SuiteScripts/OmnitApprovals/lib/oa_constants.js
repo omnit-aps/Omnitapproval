@@ -32,7 +32,8 @@ define([], () => {
         APPROVE_WITHOUT_LOGIN:    'custrecord_oa_approve_without_login',
       RESUBMIT_THRESHOLD_PCT:   'custrecord_oas_resubmit_threshold_pct',
       RESUBMIT_THRESHOLD_ABS:   'custrecord_oas_resubmit_threshold_abs',
-      HMAC_SECRET:              'custrecord_oa_hmac_secret'
+      HMAC_SECRET:              'custrecord_oa_hmac_secret',
+      ALLOW_NEGATIVE_AMOUNT:    'custrecord_oa_allow_negative_amount'
       },
       HIERARCHY: {
         SETTINGS:     'custrecord_oah_settings',
