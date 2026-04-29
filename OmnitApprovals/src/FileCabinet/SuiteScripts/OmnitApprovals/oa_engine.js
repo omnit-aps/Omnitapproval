@@ -114,6 +114,25 @@ define([
     return h;
   }
 
+  // ─── Threshold matching ──────────────────────────────────────────────────────
+  //
+  // Standardized to half-open [min, max): a threshold matches when
+  //   amount >= minAmount  AND  amount < maxAmount
+  //
+  // Inclusive on the lower bound, EXCLUSIVE on the upper. This makes adjacent
+  // thresholds (e.g. 0–500, 500–5000, 5000+) cover the number line exactly once
+  // — no gaps, no double-matches at the boundary. A threshold with no maxAmount
+  // matches up to +Infinity.
+  //
+  // Pre-fix code used inclusive-inclusive [min, max] which caused 500.00 and
+  // 5000.00 to match two adjacent rules simultaneously. With sortOrder
+  // tie-breaking the actual approver was deterministic but the boundary
+  // semantics were ambiguous and produced confusing audit logs.
+
+  function matchThresholds(thresholds, amount) {
+    return (thresholds || []).filter(t => amount >= t.minAmount && amount < t.maxAmount);
+  }
+
   // ─── Delegation ──────────────────────────────────────────────────────────────
 
   function resolveApprover(employeeId) {
@@ -152,7 +171,7 @@ define([
       if (hierarchy) {
         hierarchyId = hierarchy.id;
         amount = (typeof amountOverride === 'number') ? amountOverride : utils.getTransactionAmount(recordType, recordId);
-        const matching = hierarchy.thresholds.filter(t => amount >= t.minAmount && amount <= t.maxAmount);
+        const matching = matchThresholds(hierarchy.thresholds, amount);
 
         let matched = null;
         if (hierarchy.highestOnly) {
@@ -495,6 +514,7 @@ define([
     processDelegation,
     processReset,
     processReassign,
-    createAuditLog
+    createAuditLog,
+    matchThresholds
   };
 });
