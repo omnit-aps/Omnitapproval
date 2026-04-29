@@ -91,9 +91,42 @@ define([
           // Fall through to routing below
 
         } else if (currentStatus === C.APPROVAL_STATUS.PENDING) {
-          // UAT rule: PENDING + edit → never re-route (already in-flight)
-          log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on PENDING record — in-flight approval, skip re-routing', recordId });
-          return;
+          // H-4: PENDING + edit → if any *material* field changed, the bill is no
+          // longer the same artefact step 1 was approving. Reset to step 1 and
+          // re-route so the new material does not slip through under an
+          // approver who never saw it. Material fields per UAT:
+          //   - total / amount / usertotal  (the money)
+          //   - vendor / entity              (the counterparty)
+          //   - subsidiary                   (the entity owning the money)
+          //
+          // Non-material edits (memo, attachment, line description) leave the
+          // approval flow untouched.
+          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'subsidiary'];
+          const changed = materialFields.filter(f => {
+            const oldV = context.oldRecord ? context.oldRecord.getValue(f) : null;
+            const newV = rec.getValue(f);
+            return String(oldV || '') !== String(newV || '');
+          });
+
+          if (!changed.length) {
+            log.audit('OA-UE-BEFORE skip', { reason: 'EDIT on PENDING — no material change', recordId });
+            return;
+          }
+
+          log.audit('OA-UE-BEFORE reset to step 1', {
+            reason: 'EDIT on PENDING with material change — re-routing from step 1',
+            recordId, changed
+          });
+
+          // Clear the FX snapshot so the route below recomputes against the new
+          // amount (otherwise the H-3 freeze would keep the old amount in force).
+          try {
+            rec.setValue({ fieldId: C.FIELDS.TRANSACTION.BASE_AMOUNT, value: '' });
+            rec.setValue({ fieldId: C.FIELDS.TRANSACTION.FX_SNAPSHOT, value: '' });
+          } catch (e) { /* best effort — snapshot clear */ }
+          // Fall through to routing below; the audit-log row written by
+          // afterSubmit will be tagged RESUBMITTED because the OA log already has
+          // a SUBMITTED entry for this record.
 
         } else {
           // UAT rule: APPROVED + edit → only re-route if amount change exceeds threshold
