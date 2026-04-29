@@ -96,3 +96,76 @@ for (const ctx of NON_UI_CONTEXTS) {
       `next-approver field was not written in execContext=${ctx}`);
   });
 }
+
+// ── L-1 negative paths: SB-0 contexts must also enforce SB-1/SB-6 fail-closed
+// behaviour. Removing the allow-list filter is only meaningful if every context
+// carries the SB-1/SB-6 guarantees too. These tests pin that contract.
+
+function refusingEngine(error) {
+  return {
+    _calls: [],
+    getSettingsForSubsidiary: () => ({ id: 1 }),
+    routeForApproval: function (recordType, recordId, subsidiaryId, amount) {
+      this._calls.push({ recordType, recordId, subsidiaryId, amount });
+      return error ? { error } : { approver1: null, approver2: null, approverCount: 1, settings: {} };
+    },
+    createAuditLog: () => null
+  };
+}
+
+const NEGATIVE_CASES = [
+  { ctx: 'RESTWEBSERVICES', engine: refusingEngine('NO_SETTINGS'),       expect: /OA_ROUTING_REFUSED|NO_SETTINGS/ },
+  { ctx: 'WEBSERVICES',     engine: refusingEngine('RECORD_TYPE_DISABLED'), expect: /OA_ROUTING_REFUSED|RECORD_TYPE_DISABLED/ },
+  { ctx: 'RESTLET',         engine: refusingEngine('NO_RULE_MATCH'),      expect: /OA_ROUTING_REFUSED|NO_RULE_MATCH/ },
+  { ctx: 'CSVIMPORT',       engine: refusingEngine(null),                 expect: /OA_NO_APPROVER/ },
+  { ctx: 'SCHEDULED',       engine: refusingEngine(null),                 expect: /OA_NO_APPROVER/ },
+  { ctx: 'USEREVENT',       engine: refusingEngine('INVALID_AMOUNT'),     expect: /OA_ROUTING_REFUSED|INVALID_AMOUNT/ }
+];
+
+for (const tc of NEGATIVE_CASES) {
+  test(`L-1: beforeSubmit fails closed in execContext=${tc.ctx} when engine refuses`, () => {
+    const ue = buildUE(tc.ctx, tc.engine);
+    const newRec = makeRecordInstance({
+      type: 'vendorbill', id: null,
+      subsidiary: '2', total: '500.00', exchangerate: '1'
+    });
+    const TRIGGER = { CREATE: 'create', EDIT: 'edit' };
+
+    assert.throws(() => {
+      ue.beforeSubmit({ type: TRIGGER.CREATE, UserEventType: TRIGGER, newRecord: newRec });
+    }, tc.expect, `expected SB-1 throw in execContext=${tc.ctx} matching ${tc.expect}`);
+
+    // Most importantly: approvalstatus was NOT mutated, so the bill cannot
+    // leak into the save pipeline as a half-routed record.
+    assert.equal(newRec.getValue({ fieldId: 'approvalstatus' }), undefined,
+      `approvalstatus must not be mutated when routing refuses (execContext=${tc.ctx})`);
+  });
+}
+
+// SB-6 fail-closed in a non-UI context: a critical setValue failure must abort
+// the save with OA_WRITE_*_FAILED rather than letting the record persist.
+test('L-1: beforeSubmit aborts in RESTWEBSERVICES when approvalstatus write fails', () => {
+  const engineStub = {
+    routeForApproval: () => ({ approver1: 123, approver2: null, hierarchyId: 7, approverCount: 1, settings: {}, routeSource: 'HIERARCHY' }),
+    getSettingsForSubsidiary: () => ({ id: 1 }),
+    createAuditLog: () => null
+  };
+  const ue = buildUE('RESTWEBSERVICES', engineStub);
+
+  const data = { type: 'vendorbill', subsidiary: '2', total: '500', exchangerate: '1' };
+  const fieldOf = (a) => (typeof a === 'string' ? a : a && a.fieldId);
+  const failingRec = {
+    type: data.type, id: null,
+    getValue: (a) => data[fieldOf(a)],
+    setValue: (a) => {
+      const fid = fieldOf(a);
+      if (fid === 'approvalstatus') throw new Error('SS_VALUE_REQUIRED approvalstatus');
+      data[fid] = (typeof a === 'string') ? null : a.value;
+    },
+    save: () => 1
+  };
+
+  assert.throws(() => {
+    ue.beforeSubmit({ type: 'create', UserEventType: { CREATE: 'create', EDIT: 'edit' }, newRecord: failingRec });
+  }, /OA_WRITE_APPROVALSTATUS_FAILED/);
+});
