@@ -169,33 +169,43 @@ define([
     // Write fields on context.newRecord — persisted in the same save cycle.
     // custbody_oa_next_approver is a custom field OA owns; it is immune to NS
     // native APPROVALROUTING which resets the standard nextapprover field post-save.
-    try {
-      rec.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
-      log.audit('OA-UE-BEFORE setValue ok', { field: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING, recordId });
-    } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: 'approvalstatus', recordId, errorName: e.name, errorMessage: e.message });
+    //
+    // Critical writes (approvalstatus, next_approver, hierarchy_used) MUST succeed
+    // or the transaction will save in a half-routed state. We throw so the save is
+    // aborted instead of swallowing the failure into the audit log. Pre-SB-6
+    // versions logged "setValue FAILED" and let the bill save anyway, which is the
+    // exact failure pattern that produced the 6 auto-approved REST bills (SB-0).
+    function _setOrThrow(fieldId, value, code) {
+      try {
+        rec.setValue({ fieldId, value });
+        log.audit('OA-UE-BEFORE setValue ok', { field: fieldId, value, recordId });
+      } catch (e) {
+        log.error('OA-UE-BEFORE setValue FAILED — blocking save', { field: fieldId, attempted: value, recordId, errorName: e.name, errorMessage: e.message });
+        throw error.create({
+          name:    code,
+          message: 'OmnitApprovals could not write ' + fieldId + ' on the record (' + e.message + '). The transaction was not saved.',
+          notifyOff: true
+        });
+      }
     }
-    try {
-      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.NEXT_APPROVER, value: approver1 });
-      const readback = rec.getValue(C.FIELDS.TRANSACTION.NEXT_APPROVER);
-      log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, readback, recordId });
-    } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.NEXT_APPROVER, attempted: approver1, recordId, errorName: e.name, errorMessage: e.message });
-    }
+
+    _setOrThrow('approvalstatus',                     C.APPROVAL_STATUS.PENDING, 'OA_WRITE_APPROVALSTATUS_FAILED');
+    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    approver1,                'OA_WRITE_NEXT_APPROVER_FAILED');
+
+    // Submitted-by is informational and may not exist on all transaction types in
+    // every account. Don't block the save if it fails — log and continue.
     try {
       const userId = runtime.getCurrentUser().id;
       rec.setValue({ fieldId: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId });
       log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, value: userId, recordId });
     } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, recordId, errorName: e.name, errorMessage: e.message });
+      log.audit('OA-UE-BEFORE setValue FAILED (non-blocking)', { field: C.FIELDS.TRANSACTION.SUBMITTED_BY, recordId, errorName: e.name, errorMessage: e.message });
     }
-    try {
-      if (hierarchyId) {
-        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId });
-        log.audit('OA-UE-BEFORE setValue ok', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, value: hierarchyId, recordId });
-      }
-    } catch (e) {
-      log.audit('OA-UE-BEFORE setValue FAILED', { field: C.FIELDS.TRANSACTION.HIERARCHY_USED, recordId, errorName: e.name, errorMessage: e.message });
+
+    // Hierarchy used is part of governance state — if we resolved one, it must be
+    // persisted so audit can later prove which hierarchy approved this bill.
+    if (hierarchyId) {
+      _setOrThrow(C.FIELDS.TRANSACTION.HIERARCHY_USED, hierarchyId, 'OA_WRITE_HIERARCHY_USED_FAILED');
     }
 
     log.audit('OA-UE-BEFORE writeback complete', { recordId, recordType, approver1, hierarchyId, amount });
