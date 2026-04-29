@@ -251,6 +251,66 @@ define([
     return { approver1, approver2, hierarchyId, approverCount, settings };
   }
 
+  // ─── Optimistic concurrency ──────────────────────────────────────────────────
+  //
+  // Two approvers loading the same bill, both clicking Approve at roughly the
+  // same moment, both posting through the same RESTlet — pre-fix code happily
+  // wrote both transitions and produced two APPROVED audit rows for one bill.
+  // Worse, in step-2 flows you could land in step 2 then step 2 again instead
+  // of step 1 -> step 2.
+  //
+  // Each protected transition (approve, decline, reset, reassign, delegate)
+  // now goes through _concurrencyCheckAndBump:
+  //   1. Capture loadedVersion = txn.getValue('custbody_oa_state_version').
+  //   2. Apply business changes to txn.
+  //   3. Re-read the *persisted* version with lookupFields. If it doesn't
+  //      match loadedVersion, another transition slipped in — abort with
+  //      OA_CONCURRENT_UPDATE so the caller can retry from a fresh load.
+  //   4. Set version = loadedVersion + 1, save.
+  //
+  // This is not atomic (NS has no CAS). The check-then-save window is small
+  // (one record save), but two writers timing within that window could both
+  // pass. We accept that residual risk and surface OA_CONCURRENT_UPDATE in
+  // the much more common case of a few seconds of skew.
+
+  function _readLoadedVersion(txn) {
+    const v = parseInt(txn.getValue(C.FIELDS.TRANSACTION.STATE_VERSION), 10);
+    return isNaN(v) ? 0 : v;
+  }
+
+  function _readPersistedVersion(recordType, recordId) {
+    try {
+      const r = search.lookupFields({
+        type:    recordType,
+        id:      recordId,
+        columns: [C.FIELDS.TRANSACTION.STATE_VERSION]
+      });
+      const raw = r[C.FIELDS.TRANSACTION.STATE_VERSION];
+      const v   = parseInt(Array.isArray(raw) ? (raw[0] && raw[0].value) : raw, 10);
+      return isNaN(v) ? 0 : v;
+    } catch (e) {
+      log.error('OA-ENGINE concurrency lookup failed', { recordType, recordId, err: e.message });
+      return null;
+    }
+  }
+
+  // Returns { ok: true, newVersion } on success, { ok: false, message } on conflict.
+  function _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion) {
+    const persisted = _readPersistedVersion(recordType, recordId);
+    if (persisted === null) {
+      // Lookup failed — fall through and let the save itself fail loudly.
+      return { ok: true, newVersion: loadedVersion + 1 };
+    }
+    if (persisted !== loadedVersion) {
+      log.error('OA-ENGINE OA_CONCURRENT_UPDATE', {
+        recordType, recordId, loadedVersion, persisted
+      });
+      return { ok: false, message: 'OA_CONCURRENT_UPDATE: another approver acted on this transaction. Reload and try again.' };
+    }
+    txn.setValue({ fieldId: C.FIELDS.TRANSACTION.STATE_VERSION, value: loadedVersion + 1 });
+    return { ok: true, newVersion: loadedVersion + 1 };
+  }
+
   // ─── Step helper ─────────────────────────────────────────────────────────────
 
   function _countApprovedLogs(recordId) {
@@ -296,7 +356,8 @@ define([
       }
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step           = _countApprovedLogs(recordId) + 1;
+    const loadedVersion  = _readLoadedVersion(txn);
 
     if (!isSuperOverride) {
       // Normal flow: check if a step-2 approver is needed.
@@ -314,6 +375,8 @@ define([
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
         _setNextApprover(txn, routing.approver2);
+        const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+        if (!guard.ok) return { success: false, message: guard.message };
         try {
           txn.save({ ignoreMandatoryFields: true });
         } catch (e) {
@@ -329,6 +392,8 @@ define([
     // Final approval (normal or super override)
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.APPROVED });
     _setNextApprover(txn, null);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -368,10 +433,13 @@ define([
       }
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
 
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.REJECTED });
     _setNextApprover(txn, null);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -406,8 +474,11 @@ define([
       return { success: false, message: 'Transaction is not pending approval.' };
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
     _setNextApprover(txn, targetId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -435,8 +506,11 @@ define([
       return { success: false, message: 'Record not found.' };
     }
 
+    const loadedVersion = _readLoadedVersion(txn);
     txn.setValue({ fieldId: 'approvalstatus', value: C.APPROVAL_STATUS.PENDING });
     _setNextApprover(txn, newApproverId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {
@@ -469,8 +543,11 @@ define([
       return { success: false, message: 'Transaction is not pending — cannot reassign.' };
     }
 
-    const step = _countApprovedLogs(recordId) + 1;
+    const step          = _countApprovedLogs(recordId) + 1;
+    const loadedVersion = _readLoadedVersion(txn);
     _setNextApprover(txn, newApproverId);
+    const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
+    if (!guard.ok) return { success: false, message: guard.message };
     try {
       txn.save({ ignoreMandatoryFields: true });
     } catch (e) {

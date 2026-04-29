@@ -78,7 +78,8 @@ define([], () => {
         HIERARCHY_USED: 'custbody_oa_hierarchy_used',
         NEXT_APPROVER:  'custbody_oa_next_approver',
         BASE_AMOUNT:    'custbody_oa_base_amount',
-        FX_SNAPSHOT:    'custbody_oa_fx_snapshot'
+        FX_SNAPSHOT:    'custbody_oa_fx_snapshot',
+        STATE_VERSION:  'custbody_oa_state_version'
       }
     },
 
