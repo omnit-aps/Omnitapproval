@@ -101,7 +101,13 @@ define([
           //
           // Non-material edits (memo, attachment, line description) leave the
           // approval flow untouched.
-          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'subsidiary'];
+          //
+          // M-2: include both 'entity' and 'vendor' in the field list. NS APIs surface
+          // the vendor reference under different field IDs across SuiteScript versions
+          // and integration shims (CSV import, REST record, SOAP, scripted bundle
+          // events): some give 'entity', some give 'vendor', some give both. Watching
+          // only one alias missed real vendor swaps in a subset of contexts.
+          const materialFields = ['total', 'amount', 'usertotal', 'entity', 'vendor', 'subsidiary'];
           const changed = materialFields.filter(f => {
             const oldV = context.oldRecord ? context.oldRecord.getValue(f) : null;
             const newV = rec.getValue(f);
