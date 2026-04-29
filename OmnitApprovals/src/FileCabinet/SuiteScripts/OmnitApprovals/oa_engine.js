@@ -224,8 +224,20 @@ define([
     // mistakes (missing rules + blank defaults) must surface as a save failure, not
     // as an auto-approved transaction.
     const ruleMatched = !!approver1;
+
+    // M-1 route_source provenance. Tracks WHY this approver was picked, so audit
+    // can answer the question custbody_oa_hierarchy_used can't on default-routed
+    // bills (where hierarchyId is null and the field stays empty):
+    //   HIERARCHY — a threshold rule matched
+    //   DEFAULT   — fell back to settings.default_approver1
+    //   FAILSAFE  — reserved for future "no rule, no default, super-approver" flow
+    let routeSource = null;
+    if (ruleMatched) routeSource = C.ROUTE_SOURCES.HIERARCHY;
+
     if (!approver1) approver1 = settings.default_approver1 || null;
     if (!approver2 && approverCount >= 2) approver2 = settings.default_approver2 || null;
+
+    if (!routeSource && approver1) routeSource = C.ROUTE_SOURCES.DEFAULT;
 
     approver1 = resolveApprover(approver1);
     approver2 = resolveApprover(approver2);
@@ -234,7 +246,7 @@ define([
       recordType, recordId, subsidiaryId,
       use_amount: !!settings.use_amount,
       amount, hierarchyId, matchedThresholdId,
-      ruleMatched,
+      ruleMatched, routeSource,
       approver1, approver2, approverCount,
       defaultApprover1: settings.default_approver1,
       defaultApprover2: settings.default_approver2
@@ -248,7 +260,7 @@ define([
       return { error: 'NO_RULE_MATCH', hierarchyId, amount };
     }
 
-    return { approver1, approver2, hierarchyId, approverCount, settings };
+    return { approver1, approver2, hierarchyId, approverCount, settings, routeSource };
   }
 
   // ─── Optimistic concurrency ──────────────────────────────────────────────────

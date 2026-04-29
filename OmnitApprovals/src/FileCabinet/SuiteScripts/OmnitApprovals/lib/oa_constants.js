@@ -84,8 +84,15 @@ define([], () => {
         APPROVER1:       'custbody_oa_approver1',
         APPROVER2:       'custbody_oa_approver2',
         APPROVAL_TOKEN:  'custbody_oa_approval_token',
-        TOKEN_CREATED:   'custbody_oa_token_created'
+        TOKEN_CREATED:   'custbody_oa_token_created',
+        ROUTE_SOURCE:    'custbody_oa_route_source'
       }
+    },
+
+    ROUTE_SOURCES: {
+      HIERARCHY: 'HIERARCHY',
+      DEFAULT:   'DEFAULT',
+      FAILSAFE:  'FAILSAFE'
     },
 
     RECORD_TYPES: {

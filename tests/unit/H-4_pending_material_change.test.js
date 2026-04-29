@@ -97,6 +97,31 @@ test('H-4: vendor change while PENDING re-routes', () => {
   assert.equal(calls.routes.length, 1, 'must re-route on vendor change');
 });
 
+test('M-2: vendor change exposed under "vendor" alias (not "entity") still re-routes', () => {
+  // Some integration paths (notably scripted bundle events and certain CSV
+  // imports) surface the vendor reference under field id 'vendor' while
+  // 'entity' stays empty. Pre-M-2, the material-field list only included
+  // 'entity' and the change went undetected.
+  const calls = { routes: [] };
+  const ue    = buildUE(calls);
+
+  const oldRec = makeRecordInstance({
+    type: 'vendorbill', subsidiary: '2', total: '500', exchangerate: '1', vendor: '7',  approvalstatus: '1'
+  });
+  const newRec = makeRecordInstance({
+    type: 'vendorbill', subsidiary: '2', total: '500', exchangerate: '1', vendor: '99', approvalstatus: '1'
+  });
+
+  ue.beforeSubmit({
+    type: 'edit',
+    UserEventType: { CREATE: 'create', EDIT: 'edit' },
+    newRecord: newRec,
+    oldRecord: oldRec
+  });
+
+  assert.equal(calls.routes.length, 1, 'must re-route on vendor change exposed under "vendor" alias');
+});
+
 test('H-4: subsidiary change while PENDING re-routes', () => {
   const calls = { routes: [] };
   const ue    = buildUE(calls);
