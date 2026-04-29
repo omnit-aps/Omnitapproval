@@ -74,12 +74,17 @@ define([], () => {
       },
       // custbody fields — may not exist on all record types; all writes wrapped in try/catch
       TRANSACTION: {
-        SUBMITTED_BY:   'custbody_oa_submitted_by',
-        HIERARCHY_USED: 'custbody_oa_hierarchy_used',
-        NEXT_APPROVER:  'custbody_oa_next_approver',
-        BASE_AMOUNT:    'custbody_oa_base_amount',
-        FX_SNAPSHOT:    'custbody_oa_fx_snapshot',
-        STATE_VERSION:  'custbody_oa_state_version'
+        SUBMITTED_BY:    'custbody_oa_submitted_by',
+        HIERARCHY_USED:  'custbody_oa_hierarchy_used',
+        NEXT_APPROVER:   'custbody_oa_next_approver',
+        BASE_AMOUNT:     'custbody_oa_base_amount',
+        FX_SNAPSHOT:     'custbody_oa_fx_snapshot',
+        STATE_VERSION:   'custbody_oa_state_version',
+        CURRENT_STEP:    'custbody_oa_current_step',
+        APPROVER1:       'custbody_oa_approver1',
+        APPROVER2:       'custbody_oa_approver2',
+        APPROVAL_TOKEN:  'custbody_oa_approval_token',
+        TOKEN_CREATED:   'custbody_oa_token_created'
       }
     },
 

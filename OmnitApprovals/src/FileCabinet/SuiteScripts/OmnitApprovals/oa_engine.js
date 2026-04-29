@@ -375,6 +375,11 @@ define([
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
         _setNextApprover(txn, routing.approver2);
+        // H-6: bump current_step provenance so observers (UI tab, MR notifications,
+        // SuiteAnalytics queries) can tell which step this bill is on.
+        try {
+          txn.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 2 });
+        } catch (e) { /* informational; do not block */ }
         const guard = _concurrencyCheckAndBump(txn, recordType, recordId, loadedVersion);
         if (!guard.ok) return { success: false, message: guard.message };
         try {

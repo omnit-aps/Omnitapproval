@@ -202,7 +202,7 @@ define([
         notifyOff: true
       });
     }
-    const { approver1, hierarchyId } = result;
+    const { approver1, approver2, hierarchyId } = result;
     if (!approver1) {
       // Engine returned no approver and didn't surface an error code. Treat as a
       // governance failure: the bill must NOT save in an ungoverned state.
@@ -255,6 +255,22 @@ define([
     // persisted so audit can later prove which hierarchy approved this bill.
     if (hierarchyId) {
       _setOrThrow(C.FIELDS.TRANSACTION.HIERARCHY_USED, hierarchyId, 'OA_WRITE_HIERARCHY_USED_FAILED');
+    }
+
+    // H-6: persist provenance fields. These are best-effort (non-blocking) because
+    // they're informational — the routing decision itself is already recorded by
+    // approvalstatus + custbody_oa_next_approver + the OA log row. Their value is
+    // post-hoc audit ("who was originally approver 1 even though approver 1 then
+    // delegated to X?"), so a write failure here does not invalidate the flow.
+    try {
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 1 });
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,    value: approver1 });
+      if (approver2) {
+        rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2, value: approver2 });
+      }
+      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: 1, approver1, approver2 });
+    } catch (e) {
+      log.audit('OA-UE-BEFORE provenance write failed (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
     }
 
     // Persist the FX snapshot ONLY on the first routed submit (existingBase==0).
