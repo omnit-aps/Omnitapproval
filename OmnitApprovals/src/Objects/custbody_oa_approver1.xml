@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transactionbodycustomfield scriptid="custbody_oa_approver1">
+  <label>OA Approver 1 (resolved at submit)</label>
+  <fieldtype>SELECT</fieldtype>
+  <selectrecordtype>-4</selectrecordtype>
+  <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <bodypurchase>T</bodypurchase>
+</transactionbodycustomfield>

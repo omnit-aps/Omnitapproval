@@ -5,6 +5,7 @@
  */
 define([
   'N/email',
+  'N/record',
   'N/render',
   'N/runtime',
   'N/search',
@@ -13,7 +14,7 @@ define([
   './lib/oa_utils',
   './lib/oa_email_template',
   './oa_engine'
-], (email, render, runtime, search, url, C, utils, tpl, engine) => {
+], (email, record, render, runtime, search, url, C, utils, tpl, engine) => {
   'use strict';
 
   const PARAM_RECORD_ID   = 'custscript_oa_mr_record_id';
@@ -45,7 +46,9 @@ define([
         'AND',
         ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
         'AND',
-        ['custbody_oa_next_approver', 'isnotempty', null]
+        ['custbody_oa_next_approver', 'noneof', ['@NONE@']],
+        'AND',
+        [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'noneof', ['@NONE@']]
       ],
       columns: ['internalid', 'type']
     }).run().each(r => {
@@ -151,6 +154,9 @@ define([
         log.error('OA MR: email is enabled but no HMAC secret configured — set custrecord_oa_hmac_secret on the settings record', { subsidiaryId, recordId });
         return;
       }
+      if (!settingsSecret && SCRIPT_PARAM_SECRET) {
+        log.warn('OA MR: HMAC secret falling back to script parameter — set custrecord_oa_hmac_secret on the settings record for production', { subsidiaryId });
+      }
 
       const approveLabel = settings.approve_string || 'Approve';
       const declineLabel = settings.reject_string  || 'Reject';
@@ -227,6 +233,24 @@ define([
 
       email.send(emailParams);
       log.audit('OA MR: Email sent', `Approver: ${approverEmail} | Record: ${recordType} ${recordId} | Step: ${step}`);
+
+      // H-6: persist token diagnostics — token verification is stateless (HMAC),
+      // these fields exist purely for forensic correlation. If a token-based
+      // approval lands later, audit can match the inbound token against
+      // custbody_oa_approval_token and confirm token_created is recent enough.
+      try {
+        record.submitFields({
+          type:    recordType,
+          id:      recordId,
+          values:  {
+            [C.FIELDS.TRANSACTION.APPROVAL_TOKEN]: hmacToken,
+            [C.FIELDS.TRANSACTION.TOKEN_CREATED]: new Date()
+          },
+          options: { ignoreMandatoryFields: true, enableSourcing: false }
+        });
+      } catch (e) {
+        log.error('OA MR: token diagnostics write failed (non-blocking)', { recordId, recordType, err: e.message });
+      }
 
     } catch (e) {
       log.error('OA MR reduce error', `Record ${recordId}: ${e.message}`);

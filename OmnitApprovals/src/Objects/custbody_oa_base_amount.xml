@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transactionbodycustomfield scriptid="custbody_oa_base_amount">
+  <label>OA Base-Currency Amount (snapshot)</label>
+  <fieldtype>CURRENCY</fieldtype>
+  <ismandatory>F</ismandatory>
+  <displaytype>HIDDEN</displaytype>
+  <bodypurchase>T</bodypurchase>
+</transactionbodycustomfield>

@@ -80,6 +80,12 @@ define([
           } else {
             result = engine.processReassign(a.recordId, a.recordType, userId, a.newApprover);
           }
+        } else if (a.action === 'reset') {
+          if (!a.newApprover) {
+            result = { success: false, message: 'New approver ID required for reset.' };
+          } else {
+            result = engine.processReset(a.recordId, a.recordType, userId, a.newApprover);
+          }
         } else {
           result = { success: false, message: 'Unknown action' };
         }
@@ -114,7 +120,7 @@ define([
       'AND',
       ['approvalstatus', 'anyof', approvalStatuses],
       'AND',
-      [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'isnotempty', null]
+      [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'noneof', ['@NONE@']]
     ];
 
     // Managers and super approvers see all OA-tagged records; others see only their assigned pending records
@@ -193,9 +199,10 @@ define([
              <option value="super_decline">Super Reject</option>${reassignOpt}
              <option value="skip">Skip</option>`;
       } else if (isManager) {
-        // Manager only: can reassign but not approve directly
+        // Manager only: can reassign/reset but not approve directly
         actionOptions = `<option value="">— Select action —</option>
              <option value="reassign">Reassign</option>
+             <option value="reset">Reset &amp; Re-route</option>
              <option value="skip">Skip</option>`;
       } else {
         // Regular approver not assigned to this record — no actionable options
@@ -395,8 +402,8 @@ async function submitAll() {
     if ((action === 'super_approve' || action === 'super_decline') && !superReason.trim()) {
       showToast('Override justification is required for all Super Approve/Reject actions.'); valid = false; return;
     }
-    if (action === 'reassign' && !newApprover) {
-      showToast('Please enter a new approver ID for all reassignments.'); valid = false; return;
+    if ((action === 'reassign' || action === 'reset') && !newApprover) {
+      showToast('Please enter a new approver ID for all reassignments/resets.'); valid = false; return;
     }
     const comment = action === 'decline' ? reason : (action === 'super_approve' || action === 'super_decline') ? superReason : reason;
     actions.push({ recordId: id, recordType: type, action, comment, newApprover });

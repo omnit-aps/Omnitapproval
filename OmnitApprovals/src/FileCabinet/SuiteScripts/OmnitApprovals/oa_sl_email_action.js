@@ -48,7 +48,11 @@ define([
         const f     = search.lookupFields({ type: unverified.rt, id: unverified.rid, columns: ['subsidiary'] });
         const subId = f.subsidiary && f.subsidiary[0] ? f.subsidiary[0].value : null;
         const s     = subId ? engine.getSettingsForSubsidiary(subId) : null;
-        if (s && s.hmac_secret) utils.setHmacSecret(s.hmac_secret);
+        if (s && s.hmac_secret) {
+          utils.setHmacSecret(s.hmac_secret);
+        } else if (s && !s.hmac_secret && SCRIPT_PARAM_SECRET) {
+          log.warn('OA EA: HMAC secret falling back to script parameter — set custrecord_oa_hmac_secret on the settings record for production', { subId });
+        }
       } catch (e) { /* graceful — fall back to SCRIPT_PARAM_SECRET already set */ }
     }
 
@@ -150,7 +154,11 @@ define([
           const f     = search.lookupFields({ type: unverifiedPost.rt, id: unverifiedPost.rid, columns: ['subsidiary'] });
           const subId = f.subsidiary && f.subsidiary[0] ? f.subsidiary[0].value : null;
           const s     = subId ? engine.getSettingsForSubsidiary(subId) : null;
-          if (s && s.hmac_secret) utils.setHmacSecret(s.hmac_secret);
+          if (s && s.hmac_secret) {
+            utils.setHmacSecret(s.hmac_secret);
+          } else if (s && !s.hmac_secret && SCRIPT_PARAM_SECRET) {
+            log.warn('OA EA: HMAC secret falling back to script parameter — set custrecord_oa_hmac_secret on the settings record for production', { subId: unverifiedPost && unverifiedPost.sid });
+          }
         } catch (e) { /* graceful fallback */ }
       }
 
@@ -237,12 +245,18 @@ define([
     resp.write(JSON.stringify(result));
   }
 
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function _errorPage(msg) {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>body{font-family:-apple-system,sans-serif;padding:40px;background:#f4f4f4}
 .card{max-width:480px;margin:0 auto;background:#fff;border-radius:12px;padding:40px;box-shadow:0 2px 12px rgba(0,0,0,.09)}
 h2{color:#c74634;margin:0 0 12px}p{color:#555;line-height:1.7}</style></head>
-<body><div class="card"><h2>Error</h2><p>${msg}</p></div></body></html>`;
+<body><div class="card"><h2>Error</h2><p>${_esc(msg)}</p></div></body></html>`;
   }
 
   return { onRequest };
