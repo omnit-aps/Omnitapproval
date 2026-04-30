@@ -95,6 +95,35 @@ define([], () => {
       FAILSAFE:  'FAILSAFE'
     },
 
+    // H-7: every body field the engine owns. The User Event tamper preflight
+    // throws OA_TAMPER_DETECTED if any of these change in EDIT/XEDIT outside
+    // the trusted execution contexts (SUITELET for full-engine transitions,
+    // MAP_REDUCE narrowed to token-diagnostic fields only).
+    //
+    // Order matches the FIELDS.TRANSACTION block plus 'approvalstatus' (NS
+    // standard, not a custbody) which the engine sets to PENDING/APPROVED/REJECTED.
+    OA_CONTROL_FIELDS: [
+      'approvalstatus',
+      'custbody_oa_next_approver',
+      'custbody_oa_submitted_by',
+      'custbody_oa_hierarchy_used',
+      'custbody_oa_base_amount',
+      'custbody_oa_fx_snapshot',
+      'custbody_oa_state_version',
+      'custbody_oa_current_step',
+      'custbody_oa_approver1',
+      'custbody_oa_approver2',
+      'custbody_oa_approval_token',
+      'custbody_oa_token_created',
+      'custbody_oa_route_source'
+    ],
+
+    // MR notifications writes ONLY token diagnostics. Anything else from MR is a bug.
+    OA_MR_ALLOWED_FIELDS: [
+      'custbody_oa_approval_token',
+      'custbody_oa_token_created'
+    ],
+
     RECORD_TYPES: {
       PURCHASE_ORDER: 'purchaseorder',
       VENDOR_BILL:    'vendorbill'
@@ -107,15 +136,17 @@ define([], () => {
     },
 
     LOG_ACTIONS: {
-      SUBMITTED:      '1',
-      APPROVED:       '2',
-      REJECTED:       '3',
-      DELEGATED:      '4',
-      REASSIGNED:     '5',
-      RESET:          '6',
-      SUPER_APPROVED: '7',
-      SUPER_REJECTED: '8',
-      RESUBMITTED:    '9'
+      SUBMITTED:          '1',
+      APPROVED:           '2',
+      REJECTED:           '3',
+      DELEGATED:          '4',
+      REASSIGNED:         '5',
+      RESET:              '6',
+      SUPER_APPROVED:     '7',
+      SUPER_REJECTED:     '8',
+      RESUBMITTED:        '9',
+      // M-4: step 1 auto-skipped because submitter == approver1; step 2 takes over.
+      SUBMITTER_AUTOSKIP: '10'
     },
 
     LOG_SOURCES: {

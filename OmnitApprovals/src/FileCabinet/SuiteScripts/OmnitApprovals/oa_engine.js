@@ -7,10 +7,109 @@ define([
   'N/search',
   'N/runtime',
   'N/task',
+  'N/error',
   './lib/oa_constants',
   './lib/oa_utils'
-], (record, search, runtime, task, C, utils) => {
+], (record, search, runtime, task, error, C, utils) => {
   'use strict';
+
+  // ─── M-3 active-approver guard ──────────────────────────────────────────────
+  //
+  // Live evidence (td3075893): with Adam Minister (id 201) inactive, a $750
+  // bill on subsidiary 1 triggered NS native USER_ERROR
+  // "Invalid Field Value 201 for the following field: custbody_oa_next_approver"
+  // — a generic platform error rather than a domain-specific OA error. UAT
+  // engineers couldn't tell whether they'd hit a config bug, a custom-field
+  // misconfiguration, or a runtime regression.
+  //
+  // assertActiveEmployeeApprover throws:
+  //   OA_INVALID_APPROVER   for null / 0 / undefined IDs
+  //   OA_INACTIVE_APPROVER  for positive IDs of inactive employees
+  // Negative IDs (e.g., -5 Kathryn in td3075893 demo seed) are allowed —
+  // production NS records have positive IDs, but seed and system users
+  // sometimes have negative IDs and we don't want to break demo/test
+  // environments. Each negative-ID call audits OA_NEGATIVE_APPROVER_ID so
+  // that a misconfigured production setup is still detectable in logs.
+  //
+  // Memoised via a module-scoped Map so the same employee is only looked up
+  // once per script execution. SuiteScript loads modules fresh per execution,
+  // so the cache resets naturally between invocations.
+
+  const activeCheckCache = new Map();
+
+  function assertActiveEmployeeApprover(employeeId, label) {
+    if (employeeId === null || employeeId === undefined || employeeId === '' || employeeId === 0 || employeeId === '0') {
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals approver "' + (label || 'approver') +
+                 '" is not configured (got ' + JSON.stringify(employeeId) + ').',
+        notifyOff: true
+      });
+    }
+
+    const idNum = parseInt(employeeId, 10);
+    if (isNaN(idNum)) {
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals approver "' + (label || 'approver') +
+                 '" is not a numeric employee ID (got ' + JSON.stringify(employeeId) + ').',
+        notifyOff: true
+      });
+    }
+
+    if (idNum < 0) {
+      log.audit('OA-ENGINE OA_NEGATIVE_APPROVER_ID (allowed; demo/system seed user)', { employeeId: idNum, label });
+      return;
+    }
+
+    if (activeCheckCache.has(idNum)) {
+      const cached = activeCheckCache.get(idNum);
+      if (!cached.valid) {
+        throw error.create({
+          name:    'OA_INACTIVE_APPROVER',
+          message: 'Approver ' + idNum + ' (' + (cached.name || 'unknown') +
+                   ') is inactive. Update the threshold/default approver in settings, ' +
+                   'or contact your administrator.',
+          notifyOff: true
+        });
+      }
+      return;
+    }
+
+    let result;
+    try {
+      result = search.lookupFields({
+        type:    'employee',
+        id:      idNum,
+        columns: ['isinactive', 'firstname', 'lastname']
+      });
+    } catch (e) {
+      // Lookup itself failed (employee record may not exist, or NS hiccupped).
+      // Fail closed: a missing employee record is a domain error too.
+      log.error('OA-ENGINE assertActiveEmployeeApprover lookup failed', {
+        employeeId: idNum, label, err: e.message
+      });
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals could not validate approver ' + idNum +
+                 ' (' + (label || 'approver') + '): ' + e.message,
+        notifyOff: true
+      });
+    }
+
+    const isInactive = utils.parseBool(result.isinactive);
+    const name       = ((result.firstname || '') + ' ' + (result.lastname || '')).trim();
+    activeCheckCache.set(idNum, { valid: !isInactive, name });
+
+    if (isInactive) {
+      throw error.create({
+        name:    'OA_INACTIVE_APPROVER',
+        message: 'Approver ' + idNum + ' (' + (name || 'unknown') + ') is inactive. ' +
+                 'Update the threshold/default approver in settings, or contact your administrator.',
+        notifyOff: true
+      });
+    }
+  }
 
   // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -169,60 +268,101 @@ define([
     let approver1 = null;
     let approver2 = null;
     let hierarchyId = null;
+    let hierarchyName = null;
     let matchedThresholdId = null;
     let amount = null;
 
-    if (utils.parseBool(settings.use_amount)) {
-      const hierarchy = getActiveHierarchy(settings.id, recordType);
+    // ── M-5 strict tri-state matrix classifier ──────────────────────────────
+    //
+    // Live evidence (td3075893): pre-fix, $499.99 fell into a threshold gap on
+    // hierarchy 2 and silently routed via DEFAULT to Aaron — masquerading as a
+    // successful route. Per Jonas: "default approver in the setup should ONLY
+    // be used if an approval matrix is not covering who to approve." Falling
+    // back to default when an in-scope matrix has a hole is a bug, not a
+    // feature.
+    //
+    // Tri-state:
+    //   HIERARCHY              — active hierarchy for (sub, recordType) AND a
+    //                            threshold row matched the amount.
+    //   NO_MATRIX_IN_SCOPE     — use_amount=F OR no active hierarchy →
+    //                            fall to settings.default_approver1.
+    //   MATRIX_IN_SCOPE_NO_MATCH — active hierarchy exists AND amount fell in
+    //                            a gap → throw NO_THRESHOLD_MATCH.
+    //
+    // use_amount=F is preserved as the intentional "always use default" knob
+    // for clients with no matrix; it short-circuits the in-scope check.
+    const useAmount = utils.parseBool(settings.use_amount);
+    let matrixInScope = false;
+    let hierarchy = null;
+
+    if (useAmount) {
+      hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
-        hierarchyId = hierarchy.id;
-
-        // No 4th argument -> look it up from the record.
-        // 4th argument provided (even if null/undefined) -> trust the caller and validate.
-        if (!overrideProvided) {
-          amount = utils.getTransactionAmount(recordType, recordId);
-        } else {
-          amount = amountOverride;
-        }
-
-        // Reject inputs that cannot be matched against any band:
-        //   null / undefined  -> caller failed to read total, refuse
-        //   NaN               -> parse failure upstream, refuse
-        //   negative          -> credit notes / reversals — opt-in via
-        //                        custrecord_oa_allow_negative_amount only
-        // Each refusal returns a distinct error code so the UE log makes the
-        // root cause obvious.
-        if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
-          log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
-          return { error: 'INVALID_AMOUNT', amount };
-        }
-        if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
-          log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
-          return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
-        }
-
-        const matching = matchThresholds(hierarchy.thresholds, amount);
-
-        let matched = null;
-        if (hierarchy.highestOnly) {
-          matched = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
-        } else {
-          matched = matching[0] || null;
-        }
-        if (matched) {
-          matchedThresholdId = matched.id || null;
-          approver1 = matched.approver;
-          if (approverCount >= 2) approver2 = matched.approver2 || null;
-        }
+        matrixInScope = true;
+        hierarchyId   = hierarchy.id;
+        hierarchyName = hierarchy.name;
       }
     }
 
-    // Required-fallback policy. If no rule matched (or use_amount=false), fall back
-    // to subsidiary defaults. If defaults are also blank, refuse routing with a
-    // deterministic NO_RULE_MATCH code. The User Event will translate that into a
-    // blocking error and the bill will not save in an ungoverned state. Configuration
-    // mistakes (missing rules + blank defaults) must surface as a save failure, not
-    // as an auto-approved transaction.
+    if (matrixInScope) {
+      // No 4th argument -> look it up from the record.
+      // 4th argument provided (even if null/undefined) -> trust the caller and validate.
+      if (!overrideProvided) {
+        amount = utils.getTransactionAmount(recordType, recordId);
+      } else {
+        amount = amountOverride;
+      }
+
+      // Reject inputs that cannot be matched against any band:
+      //   null / undefined  -> caller failed to read total, refuse
+      //   NaN               -> parse failure upstream, refuse
+      //   negative          -> credit notes / reversals — opt-in via
+      //                        custrecord_oa_allow_negative_amount only
+      if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
+        log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
+        return { error: 'INVALID_AMOUNT', amount };
+      }
+      if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
+        log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
+        return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
+      }
+
+      const matching = matchThresholds(hierarchy.thresholds, amount);
+      let matched = null;
+      if (hierarchy.highestOnly) {
+        matched = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
+      } else {
+        matched = matching[0] || null;
+      }
+
+      if (matched) {
+        matchedThresholdId = matched.id || null;
+        approver1 = matched.approver;
+        if (approverCount >= 2) approver2 = matched.approver2 || null;
+      } else {
+        // M-5: matrix is in scope, but the amount fell into a gap between rows
+        // (or below the lowest minAmount, or above the highest maxAmount where
+        // no row covers it). DO NOT fall through to defaults — defaults are
+        // for the no-matrix case only. Hard-fail with a code the UE turns into
+        // OA_NO_THRESHOLD_MATCH so the bill cannot save.
+        log.error('OA-ENGINE NO_THRESHOLD_MATCH (matrix in scope, no row matched)', {
+          recordType, recordId, subsidiaryId,
+          hierarchyId, hierarchyName, amount,
+          rowCount: hierarchy.thresholds.length
+        });
+        return {
+          error:         'NO_THRESHOLD_MATCH',
+          hierarchyId,
+          hierarchyName,
+          amount,
+          thresholdRowCount: hierarchy.thresholds.length
+        };
+      }
+    }
+
+    // From here, either use_amount=F, or use_amount=T with no active hierarchy
+    // (NO_MATRIX_IN_SCOPE). In both cases falling back to defaults is the
+    // intended outcome.
     const ruleMatched = !!approver1;
 
     // M-1 route_source provenance. Tracks WHY this approver was picked, so audit
@@ -241,6 +381,21 @@ define([
 
     approver1 = resolveApprover(approver1);
     approver2 = resolveApprover(approver2);
+
+    // M-3: validate the FINAL resolved approvers (post-delegation). A delegate
+    // target who is inactive should fail just as cleanly as an inactive
+    // primary — both produce an unsuable next_approver.
+    try {
+      if (approver1) assertActiveEmployeeApprover(approver1, 'approver1');
+      if (approver2) assertActiveEmployeeApprover(approver2, 'approver2');
+    } catch (e) {
+      // Convert to engine error-code convention so the UE consumer can
+      // surface a domain-specific throw via its existing translation table.
+      log.error('OA-ENGINE approver validation failed', { name: e.name, message: e.message, approver1, approver2 });
+      return { error: e.name === 'OA_INACTIVE_APPROVER' ? 'INACTIVE_APPROVER' : 'INVALID_APPROVER',
+               message: e.message,
+               approver1, approver2 };
+    }
 
     log.audit('OA-ENGINE routeForApproval', {
       recordType, recordId, subsidiaryId,
@@ -326,14 +481,24 @@ define([
   // ─── Step helper ─────────────────────────────────────────────────────────────
 
   function _countApprovedLogs(recordId) {
-    // Count both normal approvals and super approver overrides — ACTION is a TEXT field.
+    // Count rows that consume a step:
+    //   APPROVED            (normal step approval)
+    //   SUPER_APPROVED      (super-approver override, treated as approval-equivalent)
+    //   SUBMITTER_AUTOSKIP  (M-4 step-1 skip; the next step picks up from step 2)
+    // ACTION is a TEXT field, so use 'is' with explicit OR groups.
     let count = 0;
     search.create({
       type:    C.RECORDS.LOG,
       filters: [
         [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
         'AND',
-        [[C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED], 'OR', [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUPER_APPROVED]]
+        [
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED],
+          'OR',
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUPER_APPROVED],
+          'OR',
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTER_AUTOSKIP]
+        ]
       ],
       columns: ['internalid']
     }).run().each(() => { count++; return true; });
@@ -386,6 +551,26 @@ define([
         : routeForApproval(recordType, recordId, subsidiaryId);
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
+        // M-4 step-2 guard. If the submitter (the person who originally
+        // posted the bill) IS the approver2 the engine is about to route
+        // toward, hard-fail rather than silently advance and let them
+        // self-approve at step 2. The autoskip-at-initial-route path covers
+        // submitter==approver1; this guard covers submitter==approver2 in
+        // a 2-step matrix where approver1 was someone else.
+        const submitterRaw = txn.getValue(C.FIELDS.TRANSACTION.SUBMITTED_BY);
+        const submitter    = String(submitterRaw || '');
+        if (submitter && String(routing.approver2) === submitter) {
+          log.error('OA-ENGINE OA_SELF_APPROVAL_AT_STEP_2', {
+            recordId, recordType, submitter, approver2: routing.approver2
+          });
+          return {
+            success: false,
+            message: 'OA_SELF_APPROVAL_AT_STEP_2: submitter (' + submitter +
+                     ') is also approver2. Manager must reassign step 2 to a ' +
+                     'different employee.'
+          };
+        }
+
         _setNextApprover(txn, routing.approver2);
         // H-6: bump current_step provenance so observers (UI tab, MR notifications,
         // SuiteAnalytics queries) can tell which step this bill is on.
@@ -476,6 +661,11 @@ define([
     if (!canDelegate)      return { success: false, message: 'Actor cannot delegate.' };
     if (!targetIsApprover) return { success: false, message: 'Target is not an approver.' };
 
+    // M-3: target must be active. Catch the throw and surface as
+    // {success:false, message} matching the existing transition convention.
+    try { assertActiveEmployeeApprover(targetId, 'delegate target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
+
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });
@@ -516,6 +706,10 @@ define([
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
+    // M-3: new approver must be active.
+    try { assertActiveEmployeeApprover(newApproverId, 'reset target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
+
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });
@@ -548,6 +742,10 @@ define([
     const targetIsApprover = utils.parseBool(utils.lookupEmployeeField(newApproverId,  C.FIELDS.EMPLOYEE.IS_APPROVER));
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
+
+    // M-3: new approver must be active.
+    try { assertActiveEmployeeApprover(newApproverId, 'reassign target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
 
     let txn;
     try {
@@ -648,6 +846,7 @@ define([
     processReset,
     processReassign,
     createAuditLog,
-    matchThresholds
+    matchThresholds,
+    assertActiveEmployeeApprover
   };
 });

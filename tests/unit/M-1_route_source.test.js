@@ -50,6 +50,7 @@ function buildEngine(settings, hierarchyOrNull) {
     'N/runtime': makeRuntimeMock(),
     'N/search':  search,
     'N/task':    TASK_MOCK,
+    'N/error':   { create: ({ name, message }) => { const e = new Error(message); e.name = name || 'Error'; return e; } },
     'N/crypto':  { createHash: () => ({ update: () => {}, digest: () => '' }), HashAlg: { SHA256: 'SHA256' }, Encoding: { HEX: 'HEX' } },
     'N/encode':  { Encoding: { UTF_8: 'UTF_8', BASE_64: 'BASE_64' }, convert: ({ string }) => string }
   });
@@ -91,9 +92,12 @@ test('M-1 engine: rule match returns routeSource=HIERARCHY', () => {
   assert.equal(r.routeSource, 'HIERARCHY');
 });
 
-test('M-1 engine: amount outside band falls back to default and returns routeSource=DEFAULT', () => {
-  const engine = buildEngine(SETTINGS_WITH_DEFAULT, HIERARCHY);
-  const r = engine.routeForApproval('vendorbill', 999, '2', 5000); // outside [0, 500)
+test('M-1 engine: NO active hierarchy → falls back to default and returns routeSource=DEFAULT', () => {
+  // Post-M-5: amount-outside-band triggers NO_THRESHOLD_MATCH, not DEFAULT.
+  // The DEFAULT route_source now only applies when the matrix is OUT OF
+  // SCOPE — i.e., no active hierarchy bound to (settings, recordType).
+  const engine = buildEngine(SETTINGS_WITH_DEFAULT, /*hierarchy=*/ null);
+  const r = engine.routeForApproval('vendorbill', 999, '2', 5000);
   assert.equal(r.error, undefined);
   assert.equal(r.approver1, '8');
   assert.equal(r.routeSource, 'DEFAULT');
