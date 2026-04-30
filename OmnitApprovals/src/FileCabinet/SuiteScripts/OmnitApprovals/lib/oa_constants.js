@@ -136,15 +136,17 @@ define([], () => {
     },
 
     LOG_ACTIONS: {
-      SUBMITTED:      '1',
-      APPROVED:       '2',
-      REJECTED:       '3',
-      DELEGATED:      '4',
-      REASSIGNED:     '5',
-      RESET:          '6',
-      SUPER_APPROVED: '7',
-      SUPER_REJECTED: '8',
-      RESUBMITTED:    '9'
+      SUBMITTED:          '1',
+      APPROVED:           '2',
+      REJECTED:           '3',
+      DELEGATED:          '4',
+      REASSIGNED:         '5',
+      RESET:              '6',
+      SUPER_APPROVED:     '7',
+      SUPER_REJECTED:     '8',
+      RESUBMITTED:        '9',
+      // M-4: step 1 auto-skipped because submitter == approver1; step 2 takes over.
+      SUBMITTER_AUTOSKIP: '10'
     },
 
     LOG_SOURCES: {

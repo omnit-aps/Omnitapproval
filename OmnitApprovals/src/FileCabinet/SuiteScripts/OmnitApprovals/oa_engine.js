@@ -481,14 +481,24 @@ define([
   // ─── Step helper ─────────────────────────────────────────────────────────────
 
   function _countApprovedLogs(recordId) {
-    // Count both normal approvals and super approver overrides — ACTION is a TEXT field.
+    // Count rows that consume a step:
+    //   APPROVED            (normal step approval)
+    //   SUPER_APPROVED      (super-approver override, treated as approval-equivalent)
+    //   SUBMITTER_AUTOSKIP  (M-4 step-1 skip; the next step picks up from step 2)
+    // ACTION is a TEXT field, so use 'is' with explicit OR groups.
     let count = 0;
     search.create({
       type:    C.RECORDS.LOG,
       filters: [
         [C.FIELDS.LOG.TRANSACTION, 'equalto', recordId],
         'AND',
-        [[C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED], 'OR', [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUPER_APPROVED]]
+        [
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.APPROVED],
+          'OR',
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUPER_APPROVED],
+          'OR',
+          [C.FIELDS.LOG.ACTION, 'is', C.LOG_ACTIONS.SUBMITTER_AUTOSKIP]
+        ]
       ],
       columns: ['internalid']
     }).run().each(() => { count++; return true; });
@@ -541,6 +551,26 @@ define([
         : routeForApproval(recordType, recordId, subsidiaryId);
 
       if (!routing.error && routing.approverCount >= 2 && step === 1 && routing.approver2) {
+        // M-4 step-2 guard. If the submitter (the person who originally
+        // posted the bill) IS the approver2 the engine is about to route
+        // toward, hard-fail rather than silently advance and let them
+        // self-approve at step 2. The autoskip-at-initial-route path covers
+        // submitter==approver1; this guard covers submitter==approver2 in
+        // a 2-step matrix where approver1 was someone else.
+        const submitterRaw = txn.getValue(C.FIELDS.TRANSACTION.SUBMITTED_BY);
+        const submitter    = String(submitterRaw || '');
+        if (submitter && String(routing.approver2) === submitter) {
+          log.error('OA-ENGINE OA_SELF_APPROVAL_AT_STEP_2', {
+            recordId, recordType, submitter, approver2: routing.approver2
+          });
+          return {
+            success: false,
+            message: 'OA_SELF_APPROVAL_AT_STEP_2: submitter (' + submitter +
+                     ') is also approver2. Manager must reassign step 2 to a ' +
+                     'different employee.'
+          };
+        }
+
         _setNextApprover(txn, routing.approver2);
         // H-6: bump current_step provenance so observers (UI tab, MR notifications,
         // SuiteAnalytics queries) can tell which step this bill is on.

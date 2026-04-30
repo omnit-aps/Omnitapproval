@@ -314,7 +314,7 @@ define([
         notifyOff: true
       });
     }
-    const { approver1, approver2, hierarchyId, routeSource } = result;
+    const { approver1, approver2, hierarchyId, routeSource, approverCount } = result;
     if (!approver1) {
       // Engine returned no approver and didn't surface an error code. Treat as a
       // governance failure: the bill must NOT save in an ungoverned state.
@@ -325,6 +325,59 @@ define([
                  'Configure thresholds or a default approver for subsidiary ' + subsidiaryId + '.',
         notifyOff: true
       });
+    }
+
+    // ── M-4 self-approval policy ────────────────────────────────────────────
+    //
+    // Live evidence (td3075893): bill 94060 routed to Kathryn (-5) at step 1
+    // via HIERARCHY. Kathryn was also custbody_oa_submitted_by = -5 because the
+    // REST integration ran as her. She could click Godkend on her own
+    // submission — silent self-approval.
+    //
+    // Policy:
+    //   submitter == approver1, approver2 exists, approver2 != submitter
+    //     → SKIP step 1: next_approver = approver2, current_step = 2.
+    //       afterSubmit writes an OA_SUBMITTER_AUTOSKIP audit row alongside
+    //       the SUBMITTED row.
+    //   submitter == approver1, no approver2 (1-step matrix)
+    //     → HARD FAIL with OA_SELF_APPROVAL_NO_ALTERNATE.
+    //   submitter == approver1 == approver2 (2-step matrix, same person both)
+    //     → HARD FAIL with OA_SELF_APPROVAL_NO_ALTERNATE.
+    //   submitter == approver2 at initial routing (rare — possible if vendor
+    //   matrix targets approver1 ≠ submitter and approver2 == submitter)
+    //     → routes normally; the engine processApproval at step-2 advancement
+    //       will catch it via the OA_SELF_APPROVAL_AT_STEP_2 guard.
+    let firstApprover     = approver1;
+    let firstStep         = 1;
+    let m4AutoskipApplied = false;
+    {
+      const submitter = String(runtime.getCurrentUser().id || '');
+      if (submitter && String(approver1) === submitter) {
+        const has2step    = (approverCount >= 2) && approver2;
+        const approver2Eq = has2step && (String(approver2) === submitter);
+        if (!has2step || approver2Eq) {
+          log.error('OA-UE-BEFORE block (OA_SELF_APPROVAL_NO_ALTERNATE)', {
+            recordId, recordType, subsidiaryId,
+            submitter, approver1, approver2, approverCount,
+            reason: !has2step ? '1-step matrix, submitter == approver1' : '2-step but submitter == both'
+          });
+          throw error.create({
+            name:    'OA_SELF_APPROVAL_NO_ALTERNATE',
+            message: 'OmnitApprovals refused to route: submitter (' + submitter +
+                     ') is also the only configured approver. Configure a different ' +
+                     'approver1, or add an approver2 in the matrix.',
+            notifyOff: true
+          });
+        }
+        // 2-step with a different approver2 — autoskip step 1.
+        firstApprover     = approver2;
+        firstStep         = 2;
+        m4AutoskipApplied = true;
+        log.audit('OA-UE-BEFORE M-4 autoskip', {
+          recordId, submitter, approver1, approver2,
+          message: 'Step 1 auto-skipped: submitter == approver1; routing to approver2.'
+        });
+      }
     }
 
     // Write fields on context.newRecord — persisted in the same save cycle.
@@ -351,7 +404,7 @@ define([
     }
 
     _setOrThrow('approvalstatus',                     C.APPROVAL_STATUS.PENDING, 'OA_WRITE_APPROVALSTATUS_FAILED');
-    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    approver1,                'OA_WRITE_NEXT_APPROVER_FAILED');
+    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    firstApprover,             'OA_WRITE_NEXT_APPROVER_FAILED');
 
     // Submitted-by is informational and may not exist on all transaction types in
     // every account. Don't block the save if it fails — log and continue.
@@ -386,12 +439,16 @@ define([
     // post-hoc audit ("who was originally approver 1 even though approver 1 then
     // delegated to X?"), so a write failure here does not invalidate the flow.
     try {
-      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 1 });
+      // M-4: current_step = firstStep (which is 2 when M-4 autoskip applied,
+      // 1 otherwise). approver1/approver2 always reflect the matrix-resolved
+      // pair so audit history shows who was originally meant for each step,
+      // even when the actual flow skipped step 1.
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: firstStep });
       rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,    value: approver1 });
       if (approver2) {
         rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2, value: approver2 });
       }
-      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: 1, approver1, approver2 });
+      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: firstStep, approver1, approver2, m4AutoskipApplied });
     } catch (e) {
       log.audit('OA-UE-BEFORE provenance write failed (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
     }
@@ -494,14 +551,44 @@ define([
       } catch (e) { /* graceful */ }
     }
 
+    // M-4 detection: if beforeSubmit autoskipped step 1, current_step is now 2
+    // and the original step-1 approver (custbody_oa_approver1) is the submitter.
+    // afterSubmit writes the SUBMITTED row with target=approver1 (the originally
+    // intended step-1 approver, more accurate than next_approver in autoskip
+    // case) and an additional OA_SUBMITTER_AUTOSKIP row pointing at approver2.
+    const submitterId       = runtime.getCurrentUser().id;
+    const provenanceA1      = rec.getValue(C.FIELDS.TRANSACTION.APPROVER1);
+    const provenanceStep    = parseInt(rec.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
+    const m4AutoskipDetected = provenanceStep === 2
+                                && provenanceA1
+                                && String(provenanceA1) === String(submitterId);
+
+    // SUBMITTED row's target is the approver originally intended for step 1.
+    // Pre-M-4 this equalled nextApprover; post-M-4 the autoskip case puts
+    // approver2 in nextApprover, so prefer approver1 when present.
     engine.createAuditLog({
       transactionId: recordId,
       action:        isResubmission ? C.LOG_ACTIONS.RESUBMITTED : C.LOG_ACTIONS.SUBMITTED,
-      actorId:       runtime.getCurrentUser().id,
-      targetId:      nextApprover,
+      actorId:       submitterId,
+      targetId:      provenanceA1 || nextApprover,
       step:          1,
       source:        C.LOG_SOURCES.NETSUITE
     });
+
+    if (m4AutoskipDetected) {
+      engine.createAuditLog({
+        transactionId: recordId,
+        action:        C.LOG_ACTIONS.SUBMITTER_AUTOSKIP,
+        actorId:       submitterId,
+        targetId:      nextApprover, // approver2 — where the flow advanced to
+        step:          1,
+        source:        C.LOG_SOURCES.NETSUITE,
+        comment:       'Step 1 auto-skipped: submitter == approver1; advanced to step 2.'
+      });
+      log.audit('OA-UE-AFTER OA_SUBMITTER_AUTOSKIP audit row written', {
+        recordId, submitterId, approver1: provenanceA1, nextApprover
+      });
+    }
 
     try {
       task.create({
