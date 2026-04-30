@@ -51,6 +51,72 @@ define([
     }
 
     const TRIGGER = context.UserEventType;
+
+    // ── H-7 tamper preflight ────────────────────────────────────────────────
+    //
+    // Live evidence (td3075893, 2026-04-30): REST PATCH /vendorbill/94155 with body
+    // {"custbody_oa_state_version": 5, "custbody_oa_current_step": 2} was accepted
+    // — pre-fix UE only fired on CREATE/EDIT, so XEDIT (inline edit /
+    // record.submitFields / partial REST PATCH) bypassed every check, and even
+    // EDIT in REST/CSV contexts was not validating control-field integrity.
+    //
+    // Preflight runs on EDIT and XEDIT (NOT CREATE — initial route writes the
+    // engine values from scratch and overwrites any user-supplied values). For
+    // every field in C.OA_CONTROL_FIELDS, compare oldRecord vs newRecord. If
+    // any changed, the modification is allowed only when:
+    //   - executionContext = SUITELET    → engine.processApproval / decline /
+    //                                      reset / reassign / delegate run
+    //                                      inside the email-action SL or the
+    //                                      UI-button SL. SUITELET is trusted.
+    //   - executionContext = MAP_REDUCE  → MR notifications writes the token
+    //                                      diagnostic fields (APPROVAL_TOKEN,
+    //                                      TOKEN_CREATED). Narrowed to that
+    //                                      pair only — any other field change
+    //                                      from MR is a bug and throws.
+    // Every other context (USER_INTERFACE, RESTLET, RESTWEBSERVICES, WEBSERVICES,
+    // CSV_IMPORT, SCHEDULED, USEREVENT, WORKFLOW...) throws OA_TAMPER_DETECTED.
+    //
+    // Why not a hidden marker field: a hidden body field is writeable by
+    // REST/SOAP/CSV in exactly the same way the protected fields are — a
+    // static marker is bypass-equivalent. Only runtime.executionContext,
+    // which the caller cannot forge, is reliable.
+    if (context.type === TRIGGER.EDIT || context.type === TRIGGER.XEDIT) {
+      const tampered = [];
+      for (const fid of C.OA_CONTROL_FIELDS) {
+        let oldV, newV;
+        try { oldV = context.oldRecord ? context.oldRecord.getValue(fid) : null; } catch (e) { oldV = null; }
+        try { newV = rec.getValue(fid); } catch (e) { newV = null; }
+        if (String(oldV == null ? '' : oldV) !== String(newV == null ? '' : newV)) {
+          tampered.push({ fid, oldV, newV });
+        }
+      }
+
+      if (tampered.length) {
+        let allowed = false;
+        if (execContext === runtime.ContextType.SUITELET) {
+          allowed = true;
+        } else if (execContext === runtime.ContextType.MAP_REDUCE) {
+          const allowSet = new Set(C.OA_MR_ALLOWED_FIELDS);
+          allowed = tampered.every(t => allowSet.has(t.fid));
+        }
+
+        if (!allowed) {
+          const sample = tampered[0];
+          log.error('OA-UE-BEFORE OA_TAMPER_DETECTED', {
+            execContext, recordId, recordType, triggerType: context.type,
+            tamperedFields: tampered.map(t => t.fid),
+            sample: { field: sample.fid, oldValue: sample.oldV, newValue: sample.newV }
+          });
+          throw error.create({
+            name:    'OA_TAMPER_DETECTED',
+            message: 'Control field ' + sample.fid + ' cannot be modified outside the OA engine. ' +
+                     'Detected change from execution context ' + execContext + '.',
+            notifyOff: true
+          });
+        }
+      }
+    }
+
     if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
       log.audit('OA-UE-BEFORE skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
       return;
@@ -198,8 +264,48 @@ define([
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
-      // Engine declared a deterministic refusal (NO_SETTINGS, RECORD_TYPE_DISABLED,
-      // NO_RULE_MATCH). Block the save so the bill cannot persist ungoverned.
+      // M-5: NO_THRESHOLD_MATCH means the matrix IS in scope for this
+      // (subsidiary, record_type) but the amount fell in a gap between rows.
+      // This is a configuration bug surface — Codex/UAT would otherwise see a
+      // silent DEFAULT route to the safety-net approver and assume the routing
+      // rules were doing their job. Throw a domain-specific error with the
+      // hierarchy name and the exact amount so the configurator can fix the
+      // gap immediately.
+      if (result.error === 'NO_THRESHOLD_MATCH') {
+        log.error('OA-UE-BEFORE block (NO_THRESHOLD_MATCH)', {
+          recordId, recordType, subsidiaryId,
+          hierarchyId: result.hierarchyId, hierarchyName: result.hierarchyName,
+          amount: result.amount, thresholdRowCount: result.thresholdRowCount
+        });
+        throw error.create({
+          name:    'OA_NO_THRESHOLD_MATCH',
+          message: 'No threshold row in hierarchy "' + (result.hierarchyName || result.hierarchyId) +
+                   '" matches amount ' + result.amount +
+                   '. Add a row covering this amount, or contact your administrator. ' +
+                   'Default approver fallback is not used when a matrix is in scope.',
+          notifyOff: true
+        });
+      }
+
+      // M-3: domain-specific surfacing for inactive / invalid approvers — so
+      // configurators see "Approver 201 (Adam Minister) is inactive" instead
+      // of NS native "Invalid Field Value 201 for next_approver" which says
+      // nothing about the actual cause.
+      if (result.error === 'INACTIVE_APPROVER' || result.error === 'INVALID_APPROVER') {
+        log.error('OA-UE-BEFORE block (' + result.error + ')', {
+          recordId, recordType, subsidiaryId,
+          approver1: result.approver1, approver2: result.approver2
+        });
+        throw error.create({
+          name:    'OA_' + result.error,
+          message: result.message || ('OmnitApprovals refused to route: ' + result.error),
+          notifyOff: true
+        });
+      }
+
+      // Other deterministic refusals (NO_SETTINGS, RECORD_TYPE_DISABLED,
+      // NO_RULE_MATCH, INVALID_AMOUNT, NEGATIVE_AMOUNT_REJECTED). Block the
+      // save so the bill cannot persist ungoverned.
       log.error('OA-UE-BEFORE block', { reason: 'routeForApproval error', recordId, recordType, subsidiaryId, error: result.error });
       throw error.create({
         name:    'OA_ROUTING_REFUSED',
@@ -208,7 +314,7 @@ define([
         notifyOff: true
       });
     }
-    const { approver1, approver2, hierarchyId, routeSource } = result;
+    const { approver1, approver2, hierarchyId, routeSource, approverCount } = result;
     if (!approver1) {
       // Engine returned no approver and didn't surface an error code. Treat as a
       // governance failure: the bill must NOT save in an ungoverned state.
@@ -219,6 +325,59 @@ define([
                  'Configure thresholds or a default approver for subsidiary ' + subsidiaryId + '.',
         notifyOff: true
       });
+    }
+
+    // ── M-4 self-approval policy ────────────────────────────────────────────
+    //
+    // Live evidence (td3075893): bill 94060 routed to Kathryn (-5) at step 1
+    // via HIERARCHY. Kathryn was also custbody_oa_submitted_by = -5 because the
+    // REST integration ran as her. She could click Godkend on her own
+    // submission — silent self-approval.
+    //
+    // Policy:
+    //   submitter == approver1, approver2 exists, approver2 != submitter
+    //     → SKIP step 1: next_approver = approver2, current_step = 2.
+    //       afterSubmit writes an OA_SUBMITTER_AUTOSKIP audit row alongside
+    //       the SUBMITTED row.
+    //   submitter == approver1, no approver2 (1-step matrix)
+    //     → HARD FAIL with OA_SELF_APPROVAL_NO_ALTERNATE.
+    //   submitter == approver1 == approver2 (2-step matrix, same person both)
+    //     → HARD FAIL with OA_SELF_APPROVAL_NO_ALTERNATE.
+    //   submitter == approver2 at initial routing (rare — possible if vendor
+    //   matrix targets approver1 ≠ submitter and approver2 == submitter)
+    //     → routes normally; the engine processApproval at step-2 advancement
+    //       will catch it via the OA_SELF_APPROVAL_AT_STEP_2 guard.
+    let firstApprover     = approver1;
+    let firstStep         = 1;
+    let m4AutoskipApplied = false;
+    {
+      const submitter = String(runtime.getCurrentUser().id || '');
+      if (submitter && String(approver1) === submitter) {
+        const has2step    = (approverCount >= 2) && approver2;
+        const approver2Eq = has2step && (String(approver2) === submitter);
+        if (!has2step || approver2Eq) {
+          log.error('OA-UE-BEFORE block (OA_SELF_APPROVAL_NO_ALTERNATE)', {
+            recordId, recordType, subsidiaryId,
+            submitter, approver1, approver2, approverCount,
+            reason: !has2step ? '1-step matrix, submitter == approver1' : '2-step but submitter == both'
+          });
+          throw error.create({
+            name:    'OA_SELF_APPROVAL_NO_ALTERNATE',
+            message: 'OmnitApprovals refused to route: submitter (' + submitter +
+                     ') is also the only configured approver. Configure a different ' +
+                     'approver1, or add an approver2 in the matrix.',
+            notifyOff: true
+          });
+        }
+        // 2-step with a different approver2 — autoskip step 1.
+        firstApprover     = approver2;
+        firstStep         = 2;
+        m4AutoskipApplied = true;
+        log.audit('OA-UE-BEFORE M-4 autoskip', {
+          recordId, submitter, approver1, approver2,
+          message: 'Step 1 auto-skipped: submitter == approver1; routing to approver2.'
+        });
+      }
     }
 
     // Write fields on context.newRecord — persisted in the same save cycle.
@@ -245,7 +404,7 @@ define([
     }
 
     _setOrThrow('approvalstatus',                     C.APPROVAL_STATUS.PENDING, 'OA_WRITE_APPROVALSTATUS_FAILED');
-    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    approver1,                'OA_WRITE_NEXT_APPROVER_FAILED');
+    _setOrThrow(C.FIELDS.TRANSACTION.NEXT_APPROVER,    firstApprover,             'OA_WRITE_NEXT_APPROVER_FAILED');
 
     // Submitted-by is informational and may not exist on all transaction types in
     // every account. Don't block the save if it fails — log and continue.
@@ -280,12 +439,16 @@ define([
     // post-hoc audit ("who was originally approver 1 even though approver 1 then
     // delegated to X?"), so a write failure here does not invalidate the flow.
     try {
-      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: 1 });
+      // M-4: current_step = firstStep (which is 2 when M-4 autoskip applied,
+      // 1 otherwise). approver1/approver2 always reflect the matrix-resolved
+      // pair so audit history shows who was originally meant for each step,
+      // even when the actual flow skipped step 1.
+      rec.setValue({ fieldId: C.FIELDS.TRANSACTION.CURRENT_STEP, value: firstStep });
       rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER1,    value: approver1 });
       if (approver2) {
         rec.setValue({ fieldId: C.FIELDS.TRANSACTION.APPROVER2, value: approver2 });
       }
-      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: 1, approver1, approver2 });
+      log.audit('OA-UE-BEFORE provenance written', { recordId, current_step: firstStep, approver1, approver2, m4AutoskipApplied });
     } catch (e) {
       log.audit('OA-UE-BEFORE provenance write failed (non-blocking)', { recordId, errorName: e.name, errorMessage: e.message });
     }
@@ -388,14 +551,44 @@ define([
       } catch (e) { /* graceful */ }
     }
 
+    // M-4 detection: if beforeSubmit autoskipped step 1, current_step is now 2
+    // and the original step-1 approver (custbody_oa_approver1) is the submitter.
+    // afterSubmit writes the SUBMITTED row with target=approver1 (the originally
+    // intended step-1 approver, more accurate than next_approver in autoskip
+    // case) and an additional OA_SUBMITTER_AUTOSKIP row pointing at approver2.
+    const submitterId       = runtime.getCurrentUser().id;
+    const provenanceA1      = rec.getValue(C.FIELDS.TRANSACTION.APPROVER1);
+    const provenanceStep    = parseInt(rec.getValue(C.FIELDS.TRANSACTION.CURRENT_STEP), 10) || 1;
+    const m4AutoskipDetected = provenanceStep === 2
+                                && provenanceA1
+                                && String(provenanceA1) === String(submitterId);
+
+    // SUBMITTED row's target is the approver originally intended for step 1.
+    // Pre-M-4 this equalled nextApprover; post-M-4 the autoskip case puts
+    // approver2 in nextApprover, so prefer approver1 when present.
     engine.createAuditLog({
       transactionId: recordId,
       action:        isResubmission ? C.LOG_ACTIONS.RESUBMITTED : C.LOG_ACTIONS.SUBMITTED,
-      actorId:       runtime.getCurrentUser().id,
-      targetId:      nextApprover,
+      actorId:       submitterId,
+      targetId:      provenanceA1 || nextApprover,
       step:          1,
       source:        C.LOG_SOURCES.NETSUITE
     });
+
+    if (m4AutoskipDetected) {
+      engine.createAuditLog({
+        transactionId: recordId,
+        action:        C.LOG_ACTIONS.SUBMITTER_AUTOSKIP,
+        actorId:       submitterId,
+        targetId:      nextApprover, // approver2 — where the flow advanced to
+        step:          1,
+        source:        C.LOG_SOURCES.NETSUITE,
+        comment:       'Step 1 auto-skipped: submitter == approver1; advanced to step 2.'
+      });
+      log.audit('OA-UE-AFTER OA_SUBMITTER_AUTOSKIP audit row written', {
+        recordId, submitterId, approver1: provenanceA1, nextApprover
+      });
+    }
 
     try {
       task.create({

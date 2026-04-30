@@ -42,44 +42,31 @@ function buildEngine(settings, hierarchyOrNull) {
     'N/runtime': makeRuntimeMock(),
     'N/search':  search,
     'N/task':    TASK_MOCK,
+    'N/error':   { create: ({ name, message }) => { const e = new Error(message); e.name = name || 'Error'; return e; } },
     'N/crypto':  { createHash: () => ({ update: () => {}, digest: () => '' }), HashAlg: { SHA256: 'SHA256' }, Encoding: { HEX: 'HEX' } },
     'N/encode':  { Encoding: { UTF_8: 'UTF_8', BASE_64: 'BASE_64' }, convert: ({ string }) => string }
   });
 }
 
-test('SB-2: NO_RULE_MATCH when no rule and no default approver', () => {
+test('SB-2: NO_RULE_MATCH when use_amount=F and no default approver', () => {
+  // Pre-M-5: this test used use_amount=T with a hierarchy whose threshold
+  // didn't cover the amount, expecting fall-through to defaults. Post-M-5
+  // strict matrix, that path now throws NO_THRESHOLD_MATCH instead.
+  // SB-2's actual contract is: matrix-OUT-of-scope + no default approver
+  // must surface NO_RULE_MATCH. use_amount=F is the canonical out-of-scope
+  // case (no matrix to consult).
   const settings = {
     custrecord_oa_subsidiary:        '2',
     custrecord_oa_enable_vb:         'T',
     custrecord_oa_enable_po:         'F',
-    custrecord_oa_use_amount:        'T',
+    custrecord_oa_use_amount:        'F',
     custrecord_oa_approver_count:    '1',
     custrecord_oa_default_approver1: '', // blank
     custrecord_oa_default_approver2: ''
   };
-  const hierarchy = {
-    id:                          '7',
-    custrecord_oah_settings:     '1',
-    custrecord_oah_name:         'VB-2026',
-    custrecord_oah_record_type:  '2',
-    custrecord_oah_status:       '2',
-    custrecord_oah_highest_only: 'F',
-    custrecord_oah_priority:     '10',
-    thresholds: [{
-      id: '101',
-      getValue: f => ({
-        custrecord_oat_label:      'low',
-        custrecord_oat_min_amount: '0',
-        custrecord_oat_max_amount: '100',
-        custrecord_oat_approver:   '50',
-        custrecord_oat_approver2:  '',
-        custrecord_oat_sort_order: '1'
-      }[f])
-    }]
-  };
 
-  const engine = buildEngine(settings, hierarchy);
-  const result = engine.routeForApproval('vendorbill', 999, '2', /*amount=*/ 5000); // outside threshold
+  const engine = buildEngine(settings, /*hierarchy=*/ null);
+  const result = engine.routeForApproval('vendorbill', 999, '2', /*amount=*/ 5000);
 
   assert.equal(result.error, 'NO_RULE_MATCH', 'must surface deterministic refusal code');
   assert.equal(result.approver1, undefined, 'must not return an approver');
@@ -121,36 +108,19 @@ test('SB-2: rule match returns approver and no error', () => {
   assert.equal(result.approver1, '50');
 });
 
-test('SB-2: default approver picks up when no rule matches', () => {
+test('SB-2: default approver picks up when matrix is out of scope (use_amount=F)', () => {
+  // Post-M-5 strict matrix: defaults take over only when no matrix is in
+  // scope. use_amount=F is the canonical "no matrix" config.
   const settings = {
     custrecord_oa_subsidiary:        '2',
     custrecord_oa_enable_vb:         'T',
-    custrecord_oa_use_amount:        'T',
+    custrecord_oa_use_amount:        'F',
     custrecord_oa_approver_count:    '1',
     custrecord_oa_default_approver1: '8',
     custrecord_oa_default_approver2: ''
   };
-  const hierarchy = {
-    id:                          '7',
-    custrecord_oah_settings:     '1',
-    custrecord_oah_record_type:  '2',
-    custrecord_oah_status:       '2',
-    custrecord_oah_highest_only: 'F',
-    custrecord_oah_priority:     '10',
-    thresholds: [{
-      id: '101',
-      getValue: f => ({
-        custrecord_oat_label:      'low',
-        custrecord_oat_min_amount: '0',
-        custrecord_oat_max_amount: '100',
-        custrecord_oat_approver:   '50',
-        custrecord_oat_approver2:  '',
-        custrecord_oat_sort_order: '1'
-      }[f])
-    }]
-  };
 
-  const engine = buildEngine(settings, hierarchy);
+  const engine = buildEngine(settings, /*hierarchy=*/ null);
   const result = engine.routeForApproval('vendorbill', 999, '2', /*amount=*/ 5000);
 
   assert.equal(result.error, undefined);
