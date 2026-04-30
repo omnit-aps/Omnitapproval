@@ -287,6 +287,22 @@ define([
         });
       }
 
+      // M-3: domain-specific surfacing for inactive / invalid approvers — so
+      // configurators see "Approver 201 (Adam Minister) is inactive" instead
+      // of NS native "Invalid Field Value 201 for next_approver" which says
+      // nothing about the actual cause.
+      if (result.error === 'INACTIVE_APPROVER' || result.error === 'INVALID_APPROVER') {
+        log.error('OA-UE-BEFORE block (' + result.error + ')', {
+          recordId, recordType, subsidiaryId,
+          approver1: result.approver1, approver2: result.approver2
+        });
+        throw error.create({
+          name:    'OA_' + result.error,
+          message: result.message || ('OmnitApprovals refused to route: ' + result.error),
+          notifyOff: true
+        });
+      }
+
       // Other deterministic refusals (NO_SETTINGS, RECORD_TYPE_DISABLED,
       // NO_RULE_MATCH, INVALID_AMOUNT, NEGATIVE_AMOUNT_REJECTED). Block the
       // save so the bill cannot persist ungoverned.

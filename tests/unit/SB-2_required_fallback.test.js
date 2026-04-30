@@ -42,6 +42,7 @@ function buildEngine(settings, hierarchyOrNull) {
     'N/runtime': makeRuntimeMock(),
     'N/search':  search,
     'N/task':    TASK_MOCK,
+    'N/error':   { create: ({ name, message }) => { const e = new Error(message); e.name = name || 'Error'; return e; } },
     'N/crypto':  { createHash: () => ({ update: () => {}, digest: () => '' }), HashAlg: { SHA256: 'SHA256' }, Encoding: { HEX: 'HEX' } },
     'N/encode':  { Encoding: { UTF_8: 'UTF_8', BASE_64: 'BASE_64' }, convert: ({ string }) => string }
   });

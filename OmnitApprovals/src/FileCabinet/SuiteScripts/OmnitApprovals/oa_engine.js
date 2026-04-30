@@ -7,10 +7,109 @@ define([
   'N/search',
   'N/runtime',
   'N/task',
+  'N/error',
   './lib/oa_constants',
   './lib/oa_utils'
-], (record, search, runtime, task, C, utils) => {
+], (record, search, runtime, task, error, C, utils) => {
   'use strict';
+
+  // ─── M-3 active-approver guard ──────────────────────────────────────────────
+  //
+  // Live evidence (td3075893): with Adam Minister (id 201) inactive, a $750
+  // bill on subsidiary 1 triggered NS native USER_ERROR
+  // "Invalid Field Value 201 for the following field: custbody_oa_next_approver"
+  // — a generic platform error rather than a domain-specific OA error. UAT
+  // engineers couldn't tell whether they'd hit a config bug, a custom-field
+  // misconfiguration, or a runtime regression.
+  //
+  // assertActiveEmployeeApprover throws:
+  //   OA_INVALID_APPROVER   for null / 0 / undefined IDs
+  //   OA_INACTIVE_APPROVER  for positive IDs of inactive employees
+  // Negative IDs (e.g., -5 Kathryn in td3075893 demo seed) are allowed —
+  // production NS records have positive IDs, but seed and system users
+  // sometimes have negative IDs and we don't want to break demo/test
+  // environments. Each negative-ID call audits OA_NEGATIVE_APPROVER_ID so
+  // that a misconfigured production setup is still detectable in logs.
+  //
+  // Memoised via a module-scoped Map so the same employee is only looked up
+  // once per script execution. SuiteScript loads modules fresh per execution,
+  // so the cache resets naturally between invocations.
+
+  const activeCheckCache = new Map();
+
+  function assertActiveEmployeeApprover(employeeId, label) {
+    if (employeeId === null || employeeId === undefined || employeeId === '' || employeeId === 0 || employeeId === '0') {
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals approver "' + (label || 'approver') +
+                 '" is not configured (got ' + JSON.stringify(employeeId) + ').',
+        notifyOff: true
+      });
+    }
+
+    const idNum = parseInt(employeeId, 10);
+    if (isNaN(idNum)) {
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals approver "' + (label || 'approver') +
+                 '" is not a numeric employee ID (got ' + JSON.stringify(employeeId) + ').',
+        notifyOff: true
+      });
+    }
+
+    if (idNum < 0) {
+      log.audit('OA-ENGINE OA_NEGATIVE_APPROVER_ID (allowed; demo/system seed user)', { employeeId: idNum, label });
+      return;
+    }
+
+    if (activeCheckCache.has(idNum)) {
+      const cached = activeCheckCache.get(idNum);
+      if (!cached.valid) {
+        throw error.create({
+          name:    'OA_INACTIVE_APPROVER',
+          message: 'Approver ' + idNum + ' (' + (cached.name || 'unknown') +
+                   ') is inactive. Update the threshold/default approver in settings, ' +
+                   'or contact your administrator.',
+          notifyOff: true
+        });
+      }
+      return;
+    }
+
+    let result;
+    try {
+      result = search.lookupFields({
+        type:    'employee',
+        id:      idNum,
+        columns: ['isinactive', 'firstname', 'lastname']
+      });
+    } catch (e) {
+      // Lookup itself failed (employee record may not exist, or NS hiccupped).
+      // Fail closed: a missing employee record is a domain error too.
+      log.error('OA-ENGINE assertActiveEmployeeApprover lookup failed', {
+        employeeId: idNum, label, err: e.message
+      });
+      throw error.create({
+        name:    'OA_INVALID_APPROVER',
+        message: 'OmnitApprovals could not validate approver ' + idNum +
+                 ' (' + (label || 'approver') + '): ' + e.message,
+        notifyOff: true
+      });
+    }
+
+    const isInactive = utils.parseBool(result.isinactive);
+    const name       = ((result.firstname || '') + ' ' + (result.lastname || '')).trim();
+    activeCheckCache.set(idNum, { valid: !isInactive, name });
+
+    if (isInactive) {
+      throw error.create({
+        name:    'OA_INACTIVE_APPROVER',
+        message: 'Approver ' + idNum + ' (' + (name || 'unknown') + ') is inactive. ' +
+                 'Update the threshold/default approver in settings, or contact your administrator.',
+        notifyOff: true
+      });
+    }
+  }
 
   // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -283,6 +382,21 @@ define([
     approver1 = resolveApprover(approver1);
     approver2 = resolveApprover(approver2);
 
+    // M-3: validate the FINAL resolved approvers (post-delegation). A delegate
+    // target who is inactive should fail just as cleanly as an inactive
+    // primary — both produce an unsuable next_approver.
+    try {
+      if (approver1) assertActiveEmployeeApprover(approver1, 'approver1');
+      if (approver2) assertActiveEmployeeApprover(approver2, 'approver2');
+    } catch (e) {
+      // Convert to engine error-code convention so the UE consumer can
+      // surface a domain-specific throw via its existing translation table.
+      log.error('OA-ENGINE approver validation failed', { name: e.name, message: e.message, approver1, approver2 });
+      return { error: e.name === 'OA_INACTIVE_APPROVER' ? 'INACTIVE_APPROVER' : 'INVALID_APPROVER',
+               message: e.message,
+               approver1, approver2 };
+    }
+
     log.audit('OA-ENGINE routeForApproval', {
       recordType, recordId, subsidiaryId,
       use_amount: !!settings.use_amount,
@@ -517,6 +631,11 @@ define([
     if (!canDelegate)      return { success: false, message: 'Actor cannot delegate.' };
     if (!targetIsApprover) return { success: false, message: 'Target is not an approver.' };
 
+    // M-3: target must be active. Catch the throw and surface as
+    // {success:false, message} matching the existing transition convention.
+    try { assertActiveEmployeeApprover(targetId, 'delegate target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
+
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });
@@ -557,6 +676,10 @@ define([
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
 
+    // M-3: new approver must be active.
+    try { assertActiveEmployeeApprover(newApproverId, 'reset target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
+
     let txn;
     try {
       txn = record.load({ type: recordType, id: recordId, isDynamic: false });
@@ -589,6 +712,10 @@ define([
     const targetIsApprover = utils.parseBool(utils.lookupEmployeeField(newApproverId,  C.FIELDS.EMPLOYEE.IS_APPROVER));
     if (!isManager)        return { success: false, message: 'Actor is not a manager.' };
     if (!targetIsApprover) return { success: false, message: 'New approver does not have approver access.' };
+
+    // M-3: new approver must be active.
+    try { assertActiveEmployeeApprover(newApproverId, 'reassign target'); }
+    catch (e) { return { success: false, message: e.name + ': ' + e.message }; }
 
     let txn;
     try {
@@ -689,6 +816,7 @@ define([
     processReset,
     processReassign,
     createAuditLog,
-    matchThresholds
+    matchThresholds,
+    assertActiveEmployeeApprover
   };
 });
