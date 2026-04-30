@@ -51,6 +51,72 @@ define([
     }
 
     const TRIGGER = context.UserEventType;
+
+    // ── H-7 tamper preflight ────────────────────────────────────────────────
+    //
+    // Live evidence (td3075893, 2026-04-30): REST PATCH /vendorbill/94155 with body
+    // {"custbody_oa_state_version": 5, "custbody_oa_current_step": 2} was accepted
+    // — pre-fix UE only fired on CREATE/EDIT, so XEDIT (inline edit /
+    // record.submitFields / partial REST PATCH) bypassed every check, and even
+    // EDIT in REST/CSV contexts was not validating control-field integrity.
+    //
+    // Preflight runs on EDIT and XEDIT (NOT CREATE — initial route writes the
+    // engine values from scratch and overwrites any user-supplied values). For
+    // every field in C.OA_CONTROL_FIELDS, compare oldRecord vs newRecord. If
+    // any changed, the modification is allowed only when:
+    //   - executionContext = SUITELET    → engine.processApproval / decline /
+    //                                      reset / reassign / delegate run
+    //                                      inside the email-action SL or the
+    //                                      UI-button SL. SUITELET is trusted.
+    //   - executionContext = MAP_REDUCE  → MR notifications writes the token
+    //                                      diagnostic fields (APPROVAL_TOKEN,
+    //                                      TOKEN_CREATED). Narrowed to that
+    //                                      pair only — any other field change
+    //                                      from MR is a bug and throws.
+    // Every other context (USER_INTERFACE, RESTLET, RESTWEBSERVICES, WEBSERVICES,
+    // CSV_IMPORT, SCHEDULED, USEREVENT, WORKFLOW...) throws OA_TAMPER_DETECTED.
+    //
+    // Why not a hidden marker field: a hidden body field is writeable by
+    // REST/SOAP/CSV in exactly the same way the protected fields are — a
+    // static marker is bypass-equivalent. Only runtime.executionContext,
+    // which the caller cannot forge, is reliable.
+    if (context.type === TRIGGER.EDIT || context.type === TRIGGER.XEDIT) {
+      const tampered = [];
+      for (const fid of C.OA_CONTROL_FIELDS) {
+        let oldV, newV;
+        try { oldV = context.oldRecord ? context.oldRecord.getValue(fid) : null; } catch (e) { oldV = null; }
+        try { newV = rec.getValue(fid); } catch (e) { newV = null; }
+        if (String(oldV == null ? '' : oldV) !== String(newV == null ? '' : newV)) {
+          tampered.push({ fid, oldV, newV });
+        }
+      }
+
+      if (tampered.length) {
+        let allowed = false;
+        if (execContext === runtime.ContextType.SUITELET) {
+          allowed = true;
+        } else if (execContext === runtime.ContextType.MAP_REDUCE) {
+          const allowSet = new Set(C.OA_MR_ALLOWED_FIELDS);
+          allowed = tampered.every(t => allowSet.has(t.fid));
+        }
+
+        if (!allowed) {
+          const sample = tampered[0];
+          log.error('OA-UE-BEFORE OA_TAMPER_DETECTED', {
+            execContext, recordId, recordType, triggerType: context.type,
+            tamperedFields: tampered.map(t => t.fid),
+            sample: { field: sample.fid, oldValue: sample.oldV, newValue: sample.newV }
+          });
+          throw error.create({
+            name:    'OA_TAMPER_DETECTED',
+            message: 'Control field ' + sample.fid + ' cannot be modified outside the OA engine. ' +
+                     'Detected change from execution context ' + execContext + '.',
+            notifyOff: true
+          });
+        }
+      }
+    }
+
     if (context.type !== TRIGGER.CREATE && context.type !== TRIGGER.EDIT) {
       log.audit('OA-UE-BEFORE skip', { reason: 'trigger not CREATE/EDIT', type: context.type, recordId });
       return;
