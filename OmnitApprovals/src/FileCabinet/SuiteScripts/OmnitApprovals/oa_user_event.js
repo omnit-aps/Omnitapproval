@@ -264,8 +264,32 @@ define([
 
     const result = engine.routeForApproval(recordType, recordId, subsidiaryId, amount);
     if (result.error) {
-      // Engine declared a deterministic refusal (NO_SETTINGS, RECORD_TYPE_DISABLED,
-      // NO_RULE_MATCH). Block the save so the bill cannot persist ungoverned.
+      // M-5: NO_THRESHOLD_MATCH means the matrix IS in scope for this
+      // (subsidiary, record_type) but the amount fell in a gap between rows.
+      // This is a configuration bug surface — Codex/UAT would otherwise see a
+      // silent DEFAULT route to the safety-net approver and assume the routing
+      // rules were doing their job. Throw a domain-specific error with the
+      // hierarchy name and the exact amount so the configurator can fix the
+      // gap immediately.
+      if (result.error === 'NO_THRESHOLD_MATCH') {
+        log.error('OA-UE-BEFORE block (NO_THRESHOLD_MATCH)', {
+          recordId, recordType, subsidiaryId,
+          hierarchyId: result.hierarchyId, hierarchyName: result.hierarchyName,
+          amount: result.amount, thresholdRowCount: result.thresholdRowCount
+        });
+        throw error.create({
+          name:    'OA_NO_THRESHOLD_MATCH',
+          message: 'No threshold row in hierarchy "' + (result.hierarchyName || result.hierarchyId) +
+                   '" matches amount ' + result.amount +
+                   '. Add a row covering this amount, or contact your administrator. ' +
+                   'Default approver fallback is not used when a matrix is in scope.',
+          notifyOff: true
+        });
+      }
+
+      // Other deterministic refusals (NO_SETTINGS, RECORD_TYPE_DISABLED,
+      // NO_RULE_MATCH, INVALID_AMOUNT, NEGATIVE_AMOUNT_REJECTED). Block the
+      // save so the bill cannot persist ungoverned.
       log.error('OA-UE-BEFORE block', { reason: 'routeForApproval error', recordId, recordType, subsidiaryId, error: result.error });
       throw error.create({
         name:    'OA_ROUTING_REFUSED',

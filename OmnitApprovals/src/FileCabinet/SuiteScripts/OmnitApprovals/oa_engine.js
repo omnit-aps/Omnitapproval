@@ -169,60 +169,101 @@ define([
     let approver1 = null;
     let approver2 = null;
     let hierarchyId = null;
+    let hierarchyName = null;
     let matchedThresholdId = null;
     let amount = null;
 
-    if (utils.parseBool(settings.use_amount)) {
-      const hierarchy = getActiveHierarchy(settings.id, recordType);
+    // ── M-5 strict tri-state matrix classifier ──────────────────────────────
+    //
+    // Live evidence (td3075893): pre-fix, $499.99 fell into a threshold gap on
+    // hierarchy 2 and silently routed via DEFAULT to Aaron — masquerading as a
+    // successful route. Per Jonas: "default approver in the setup should ONLY
+    // be used if an approval matrix is not covering who to approve." Falling
+    // back to default when an in-scope matrix has a hole is a bug, not a
+    // feature.
+    //
+    // Tri-state:
+    //   HIERARCHY              — active hierarchy for (sub, recordType) AND a
+    //                            threshold row matched the amount.
+    //   NO_MATRIX_IN_SCOPE     — use_amount=F OR no active hierarchy →
+    //                            fall to settings.default_approver1.
+    //   MATRIX_IN_SCOPE_NO_MATCH — active hierarchy exists AND amount fell in
+    //                            a gap → throw NO_THRESHOLD_MATCH.
+    //
+    // use_amount=F is preserved as the intentional "always use default" knob
+    // for clients with no matrix; it short-circuits the in-scope check.
+    const useAmount = utils.parseBool(settings.use_amount);
+    let matrixInScope = false;
+    let hierarchy = null;
+
+    if (useAmount) {
+      hierarchy = getActiveHierarchy(settings.id, recordType);
       if (hierarchy) {
-        hierarchyId = hierarchy.id;
-
-        // No 4th argument -> look it up from the record.
-        // 4th argument provided (even if null/undefined) -> trust the caller and validate.
-        if (!overrideProvided) {
-          amount = utils.getTransactionAmount(recordType, recordId);
-        } else {
-          amount = amountOverride;
-        }
-
-        // Reject inputs that cannot be matched against any band:
-        //   null / undefined  -> caller failed to read total, refuse
-        //   NaN               -> parse failure upstream, refuse
-        //   negative          -> credit notes / reversals — opt-in via
-        //                        custrecord_oa_allow_negative_amount only
-        // Each refusal returns a distinct error code so the UE log makes the
-        // root cause obvious.
-        if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
-          log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
-          return { error: 'INVALID_AMOUNT', amount };
-        }
-        if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
-          log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
-          return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
-        }
-
-        const matching = matchThresholds(hierarchy.thresholds, amount);
-
-        let matched = null;
-        if (hierarchy.highestOnly) {
-          matched = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
-        } else {
-          matched = matching[0] || null;
-        }
-        if (matched) {
-          matchedThresholdId = matched.id || null;
-          approver1 = matched.approver;
-          if (approverCount >= 2) approver2 = matched.approver2 || null;
-        }
+        matrixInScope = true;
+        hierarchyId   = hierarchy.id;
+        hierarchyName = hierarchy.name;
       }
     }
 
-    // Required-fallback policy. If no rule matched (or use_amount=false), fall back
-    // to subsidiary defaults. If defaults are also blank, refuse routing with a
-    // deterministic NO_RULE_MATCH code. The User Event will translate that into a
-    // blocking error and the bill will not save in an ungoverned state. Configuration
-    // mistakes (missing rules + blank defaults) must surface as a save failure, not
-    // as an auto-approved transaction.
+    if (matrixInScope) {
+      // No 4th argument -> look it up from the record.
+      // 4th argument provided (even if null/undefined) -> trust the caller and validate.
+      if (!overrideProvided) {
+        amount = utils.getTransactionAmount(recordType, recordId);
+      } else {
+        amount = amountOverride;
+      }
+
+      // Reject inputs that cannot be matched against any band:
+      //   null / undefined  -> caller failed to read total, refuse
+      //   NaN               -> parse failure upstream, refuse
+      //   negative          -> credit notes / reversals — opt-in via
+      //                        custrecord_oa_allow_negative_amount only
+      if (amount === null || amount === undefined || (typeof amount !== 'number') || isNaN(amount)) {
+        log.error('OA-ENGINE INVALID_AMOUNT', { recordType, recordId, subsidiaryId, amount });
+        return { error: 'INVALID_AMOUNT', amount };
+      }
+      if (amount < 0 && !utils.parseBool(settings.allow_negative_amount)) {
+        log.error('OA-ENGINE NEGATIVE_AMOUNT_REJECTED', { recordType, recordId, subsidiaryId, amount });
+        return { error: 'NEGATIVE_AMOUNT_REJECTED', amount };
+      }
+
+      const matching = matchThresholds(hierarchy.thresholds, amount);
+      let matched = null;
+      if (hierarchy.highestOnly) {
+        matched = matching.reduce((best, t) => !best || t.minAmount > best.minAmount ? t : best, null);
+      } else {
+        matched = matching[0] || null;
+      }
+
+      if (matched) {
+        matchedThresholdId = matched.id || null;
+        approver1 = matched.approver;
+        if (approverCount >= 2) approver2 = matched.approver2 || null;
+      } else {
+        // M-5: matrix is in scope, but the amount fell into a gap between rows
+        // (or below the lowest minAmount, or above the highest maxAmount where
+        // no row covers it). DO NOT fall through to defaults — defaults are
+        // for the no-matrix case only. Hard-fail with a code the UE turns into
+        // OA_NO_THRESHOLD_MATCH so the bill cannot save.
+        log.error('OA-ENGINE NO_THRESHOLD_MATCH (matrix in scope, no row matched)', {
+          recordType, recordId, subsidiaryId,
+          hierarchyId, hierarchyName, amount,
+          rowCount: hierarchy.thresholds.length
+        });
+        return {
+          error:         'NO_THRESHOLD_MATCH',
+          hierarchyId,
+          hierarchyName,
+          amount,
+          thresholdRowCount: hierarchy.thresholds.length
+        };
+      }
+    }
+
+    // From here, either use_amount=F, or use_amount=T with no active hierarchy
+    // (NO_MATRIX_IN_SCOPE). In both cases falling back to defaults is the
+    // intended outcome.
     const ruleMatched = !!approver1;
 
     // M-1 route_source provenance. Tracks WHY this approver was picked, so audit

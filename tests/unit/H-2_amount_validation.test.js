@@ -109,11 +109,46 @@ test('H-2: -100 is rejected when allow_negative_amount is OFF', () => {
   assert.equal(result.error, 'NEGATIVE_AMOUNT_REJECTED');
 });
 
-test('H-2: -100 is permitted when allow_negative_amount is ON', () => {
-  const engine = buildEngine(SETTINGS_ALLOW_NEG, HIERARCHY);
+test('H-2: -100 is permitted when allow_negative_amount is ON (matrix has covering row)', () => {
+  // Post-M-5 strict matrix: when use_amount=T and the matrix is in scope,
+  // the amount must match a row. To exercise the negative-amount allow flag
+  // we need a hierarchy with a row that covers negatives. This is the realistic
+  // production setup for a credit-note rule.
+  const HIERARCHY_WITH_NEGATIVES = {
+    id: '7',
+    custrecord_oah_settings:     '1',
+    custrecord_oah_record_type:  '2',
+    custrecord_oah_status:       '2',
+    custrecord_oah_highest_only: 'F',
+    custrecord_oah_priority:     '10',
+    thresholds: [
+      {
+        id: '100',
+        getValue: f => ({
+          custrecord_oat_label:      'credit-notes',
+          custrecord_oat_min_amount: '-1000',
+          custrecord_oat_max_amount: '0',
+          custrecord_oat_approver:   '77',
+          custrecord_oat_approver2:  '',
+          custrecord_oat_sort_order: '0'
+        }[f])
+      },
+      {
+        id: '101',
+        getValue: f => ({
+          custrecord_oat_label:      'low',
+          custrecord_oat_min_amount: '0',
+          custrecord_oat_max_amount: '500',
+          custrecord_oat_approver:   '50',
+          custrecord_oat_approver2:  '',
+          custrecord_oat_sort_order: '1'
+        }[f])
+      }
+    ]
+  };
+  const engine = buildEngine(SETTINGS_ALLOW_NEG, HIERARCHY_WITH_NEGATIVES);
   const result = engine.routeForApproval('vendorbill', 999, '2', -100);
-  // Negative amount fails to match the [0, 500) rule but the default approver
-  // takes over because of the SB-2 fallback policy. No error code expected.
   assert.equal(result.error, undefined);
-  assert.equal(result.approver1, '8');
+  assert.equal(result.approver1, '77', 'must route via the negative-covering row');
+  assert.equal(result.routeSource, 'HIERARCHY');
 });
