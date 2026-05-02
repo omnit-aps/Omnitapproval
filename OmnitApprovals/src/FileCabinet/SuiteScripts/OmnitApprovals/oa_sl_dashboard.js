@@ -25,9 +25,21 @@ define([
 
     const userId  = runtime.getCurrentUser().id;
     const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_dashboard', deploymentId: 'customdeploy_oa_sl_dashboard', returnExternalUrl: false });
+    const settingsUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
 
     const typeFilter   = req.parameters.oa_filter_type   || 'all';
     const statusFilter = req.parameters.oa_filter_status || 'pending';
+
+    const dateFrom    = req.parameters.oa_filter_date_from    || '';
+    const dateTo      = req.parameters.oa_filter_date_to      || '';
+    const vendorId    = req.parameters.oa_filter_vendor       || '';
+    const amountMin   = req.parameters.oa_filter_amount_min   || '';
+    const amountMax   = req.parameters.oa_filter_amount_max   || '';
+    const subsidiaryId = req.parameters.oa_filter_subsidiary  || '';
+
+    const quickAction = req.parameters.oa_quick_action || '';
+    const quickId     = req.parameters.oa_quick_id     || '';
+    const quickType   = req.parameters.oa_quick_type   || '';
 
     let isSuperApprover = false, isManager = false;
     try {
@@ -36,8 +48,11 @@ define([
       isManager       = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER]);
     } catch (e) { /* graceful */ }
 
-    const rows = loadPendingTransactions(userId, typeFilter, statusFilter);
-    resp.write(renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager));
+    const approvers    = loadActiveApprovers();
+    const vendors      = loadVendorList();
+    const subsidiaries = loadSubsidiaryList();
+    const rows = loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId);
+    resp.write(renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries));
   }
 
   // ─── Batch POST ───────────────────────────────────────────────────────────────
@@ -101,7 +116,7 @@ define([
 
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
-  function loadPendingTransactions(userId, typeFilter, statusFilter) {
+  function loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId) {
     let isManager = false, isSuperApprover = false;
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
@@ -128,6 +143,30 @@ define([
       filters.push('AND', ['custbody_oa_next_approver', 'anyof', [userId]]);
     }
 
+    // ── Additional advanced filters ──────────────────────────────────────────────
+    if (dateFrom && dateTo) {
+      filters.push('AND', ['trandate', 'within', dateFrom, dateTo]);
+    } else if (dateFrom) {
+      filters.push('AND', ['trandate', 'onorafter', dateFrom]);
+    } else if (dateTo) {
+      filters.push('AND', ['trandate', 'onorbefore', dateTo]);
+    }
+
+    if (vendorId) {
+      filters.push('AND', ['entity', 'anyof', [vendorId]]);
+    }
+
+    if (amountMin && !isNaN(parseFloat(amountMin))) {
+      filters.push('AND', ['amount', 'greaterthanorequalto', parseFloat(amountMin)]);
+    }
+    if (amountMax && !isNaN(parseFloat(amountMax))) {
+      filters.push('AND', ['amount', 'lessthanorequalto', parseFloat(amountMax)]);
+    }
+
+    if (subsidiaryId) {
+      filters.push('AND', ['subsidiary', 'anyof', [subsidiaryId]]);
+    }
+
     const rows = [];
     search.create({
       type:    'transaction',
@@ -136,10 +175,13 @@ define([
         'internalid', 'type', 'tranid', 'entity', 'currency', 'subsidiary',
         'amount', 'approvalstatus', 'custbody_oa_next_approver',
         C.FIELDS.TRANSACTION.SUBMITTED_BY,
+        C.FIELDS.TRANSACTION.BASE_AMOUNT,
         { name: 'datecreated' }
       ]
     }).run().each(r => {
       const approvalStatus = r.getValue('approvalstatus');
+      const txnAmount  = parseFloat(r.getValue('amount')) || 0;
+      const baseAmount = parseFloat(r.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
       rows.push({
         id:          r.id,
         type:        r.getValue('type') === 'PurchOrd' ? 'purchaseorder' : 'vendorbill',
@@ -148,7 +190,8 @@ define([
         entity:      r.getText('entity'),
         currency:    r.getText('currency'),
         subsidiary:  r.getText('subsidiary'),
-        amount:      parseFloat(r.getValue('amount')) || 0,
+        amount:      txnAmount,
+        baseAmount:  baseAmount,
         status:      approvalStatus,
         statusLabel: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'Pending'
                    : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
@@ -165,6 +208,94 @@ define([
     return rows;
   }
 
+  // ─── Active approvers for reassign dropdown ───────────────────────────────────
+
+  function loadActiveApprovers() {
+    const approvers = [];
+    try {
+      search.create({
+        type: 'employee',
+        filters: [
+          ['isinactive', 'is', 'F'],
+          'AND',
+          [C.FIELDS.EMPLOYEE.IS_APPROVER, 'is', 'T']
+        ],
+        columns: [
+          { name: 'internalid' },
+          { name: 'entityid' },
+          { name: 'firstname' },
+          { name: 'lastname' }
+        ]
+      }).run().each(r => {
+        const first = r.getValue('firstname') || '';
+        const last  = r.getValue('lastname')  || '';
+        const entity = r.getValue('entityid') || '';
+        const display = (first || last) ? `${first} ${last}`.trim() : entity;
+        approvers.push({ id: r.id, name: display });
+        return true;
+      });
+      approvers.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) { /* graceful — return empty list; fallback handled in render */ }
+    return approvers;
+  }
+
+  // ─── Vendor list for filter dropdown ─────────────────────────────────────────
+
+  function loadVendorList() {
+    const seen = {};
+    const vendors = [];
+    try {
+      search.create({
+        type: 'transaction',
+        filters: [
+          ['type', 'anyof', 'PurchOrd', 'VendBill'],
+          'AND', ['custbody_oa_routed', 'is', 'T'],
+          'AND', ['approvalstatus', 'is', '1'],
+          'AND', ['mainline', 'is', 'T']
+        ],
+        columns: [
+          { name: 'entity' },
+          { name: 'entitynohierarchy' }
+        ]
+      }).run().each(r => {
+        const id   = r.getValue('entity');
+        const name = r.getText('entity') || r.getValue('entitynohierarchy') || id;
+        if (id && !seen[id]) { seen[id] = true; vendors.push({ id, name }); }
+        return true;
+      });
+      vendors.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) { /* graceful — return empty list */ }
+    return vendors;
+  }
+
+  // ─── Subsidiary list for filter dropdown ─────────────────────────────────────
+
+  function loadSubsidiaryList() {
+    const seen = {};
+    const subs = [];
+    try {
+      search.create({
+        type: 'transaction',
+        filters: [
+          ['type', 'anyof', 'PurchOrd', 'VendBill'],
+          'AND', ['custbody_oa_routed', 'is', 'T'],
+          'AND', ['approvalstatus', 'is', '1'],
+          'AND', ['mainline', 'is', 'T']
+        ],
+        columns: [
+          { name: 'subsidiary' }
+        ]
+      }).run().each(r => {
+        const id   = r.getValue('subsidiary');
+        const name = r.getText('subsidiary') || id;
+        if (id && !seen[id]) { seen[id] = true; subs.push({ id, name }); }
+        return true;
+      });
+      subs.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) { /* graceful — return empty list */ }
+    return subs;
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────────
 
   function _esc(s) {
@@ -173,7 +304,29 @@ define([
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function renderDashboard(rows, selfUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager) {
+  function renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries) {
+    // Feature 1: build approver <select> options once, reused per row
+    const approverOpts = (approvers || []).map(a =>
+      `<option value="${_esc(a.id)}">${_esc(a.name)}</option>`
+    ).join('');
+
+    // Advanced filter dropdowns
+    const vendorOpts = (vendors || []).map(v =>
+      `<option value="${_esc(v.id)}"${vendorId === String(v.id) ? ' selected' : ''}>${_esc(v.name)}</option>`
+    ).join('');
+    const subsidiaryOpts = (subsidiaries || []).map(s =>
+      `<option value="${_esc(s.id)}"${subsidiaryId === String(s.id) ? ' selected' : ''}>${_esc(s.name)}</option>`
+    ).join('');
+
+    // Build "clear filters" URL — strip all oa_filter_* params except status/type chips
+    const clearUrl = `${_esc(selfUrl)}?oa_filter_status=${_esc(statusFilter)}&amp;oa_filter_type=${_esc(typeFilter)}`;
+
+    // Feature 2: map record type to NS transaction URL segment
+    function txnUrl(type, id) {
+      const seg = type === 'purchaseorder' ? 'purchord' : 'vendbill';
+      return `/app/accounting/transactions/${seg}.nl?id=${encodeURIComponent(id)}`;
+    }
+
     const totalApproved = rows.filter(r => r.status === C.APPROVAL_STATUS.APPROVED).reduce((s, r) => s + r.amount, 0);
     const totalRejected = rows.filter(r => r.status === C.APPROVAL_STATUS.REJECTED).reduce((s, r) => s + r.amount, 0);
     const totalPending  = rows.filter(r => r.status === C.APPROVAL_STATUS.PENDING).length;
@@ -214,7 +367,11 @@ define([
           ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
           : isSuperApprover
             ? `<input type="text" class="super-reason-input" data-id="${_esc(r.id)}" placeholder="Override justification (required)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-            : (isManager ? `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">` : '');
+            : (isManager
+                ? (approverOpts
+                    ? `<select class="reassign-input" data-id="${_esc(r.id)}" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff"><option value="">— Select approver —</option>${approverOpts}</select>`
+                    : `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`)
+                : '');
       return `
       <tr data-id="${_esc(r.id)}" data-type="${_esc(r.type)}">
         <td>
@@ -225,10 +382,19 @@ define([
         <td>${inputCell}</td>
         <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${_esc(r.typeLabel)}</span></td>
         <td class="fw500">${_esc(r.entity) || '—'}</td>
-        <td class="mono">${_esc(r.tranid)}</td>
+        <td class="mono"><a href="${_esc(txnUrl(r.type, r.id))}" target="_blank" rel="noopener" style="color:#1565c0;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${_esc(r.tranid)}</a></td>
         <td>${_esc(r.currency)}</td>
         <td>${_esc(r.subsidiary)}</td>
-        <td class="amount">${_esc(r.currency)} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td class="amount">${_esc(r.currency)} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}${
+          // Feature 3: show base-currency equivalent when it differs from transaction amount
+          // custbody_oa_base_amount stores the base-currency snapshot captured at routing time.
+          // We show it only when non-zero and meaningfully different from the displayed amount
+          // (handles both cross-currency and same-currency transactions).
+          // TODO: if base currency symbol is needed, join against subsidiary record here.
+          (r.baseAmount && Math.abs(r.baseAmount - r.amount) > 0.005)
+            ? `<div style="font-size:11px;color:#888;font-weight:400;margin-top:2px">Base: ${r.baseAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>`
+            : ''
+        }</td>
         <td>${_esc(r.submittedBy) || '—'}</td>
         <td>${_esc(r.nextApprover)}</td>
         <td class="muted">${_esc(r.created) || '—'}</td>
@@ -245,10 +411,12 @@ define([
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#f0efee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#312d2a;font-size:14px}
-  .topbar{background:#312d2a;padding:0 32px;height:52px;display:flex;align-items:center;gap:16px}
+  .topbar{background:#312d2a;padding:0 32px;height:52px;display:flex;align-items:center;gap:16px;justify-content:space-between}
   .topbar-logo{color:#c74634;font-weight:700;font-size:16px;letter-spacing:.5px}
   .topbar-sep{color:#666;font-size:18px}
   .topbar-title{color:#ccc;font-size:14px}
+  .topbar-settings{color:#ccc;font-size:13px;font-weight:500;text-decoration:none;padding:6px 14px;border-radius:6px;border:1px solid #4a4541;transition:background .15s,color .15s;margin-left:auto}
+  .topbar-settings:hover{background:#4a4541;color:#fff}
   .main{max-width:1400px;margin:0 auto;padding:28px 24px}
   .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
   h1{font-size:24px;font-weight:700}
@@ -292,6 +460,18 @@ define([
   .btn-secondary{background:#f5f5f5;color:#555;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;border:none;cursor:pointer;display:inline-block}
   .toast{position:fixed;bottom:28px;right:28px;background:#312d2a;color:#fff;padding:14px 22px;border-radius:10px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.2);opacity:0;transition:opacity .3s;z-index:9999}
   .toast.show{opacity:1}
+  .adv-filters{display:flex;align-items:flex-end;gap:12px;margin-bottom:20px;flex-wrap:wrap;background:#fff;border-radius:10px;padding:14px 18px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+  .adv-filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px;flex:1}
+  .adv-filter-group label{font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px}
+  .adv-filter-group input,.adv-filter-group select{padding:7px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;background:#fff;color:#312d2a;transition:border-color .15s}
+  .adv-filter-group input:focus,.adv-filter-group select:focus{border-color:#c74634;outline:none}
+  .adv-filter-range{display:flex;gap:6px;align-items:center}
+  .adv-filter-range input{flex:1;min-width:0}
+  .adv-filter-range span{font-size:12px;color:#aaa;flex-shrink:0}
+  .btn-clear-filters{padding:7px 16px;border-radius:6px;border:1.5px solid #ddd;font-size:13px;font-weight:500;cursor:pointer;background:#fff;color:#555;text-decoration:none;white-space:nowrap;align-self:flex-end;transition:all .15s}
+  .btn-clear-filters:hover{border-color:#c74634;color:#c74634}
+  .btn-apply-filters{padding:7px 18px;border-radius:6px;border:none;font-size:13px;font-weight:600;cursor:pointer;background:#c74634;color:#fff;white-space:nowrap;align-self:flex-end;transition:background .15s}
+  .btn-apply-filters:hover{background:#b03d2e}
 </style>
 </head>
 <body>
@@ -299,6 +479,7 @@ define([
   <span class="topbar-logo">OMNI:T</span>
   <span class="topbar-sep">›</span>
   <span class="topbar-title">Omnit Approvals — Bulk Approval</span>
+  <a href="${settingsUrl}" class="topbar-settings">Settings</a>
 </div>
 <div class="main">
   <div class="page-header">
@@ -324,6 +505,43 @@ define([
     <button class="filter-btn ${typeFilter === 'po'  ? 'active' : ''}" onclick="setFilter('type','po')">Purchase Order</button>
     <button class="filter-btn ${typeFilter === 'vb'  ? 'active' : ''}" onclick="setFilter('type','vb')">Vendor Bill</button>
   </div>
+
+  <form id="adv-filter-form" method="GET" action="${_esc(selfUrl)}" class="adv-filters">
+    <input type="hidden" name="oa_filter_status" value="${_esc(statusFilter)}">
+    <input type="hidden" name="oa_filter_type"   value="${_esc(typeFilter)}">
+    <div class="adv-filter-group">
+      <label>Date from</label>
+      <input type="date" name="oa_filter_date_from" value="${_esc(dateFrom)}">
+    </div>
+    <div class="adv-filter-group">
+      <label>Date to</label>
+      <input type="date" name="oa_filter_date_to" value="${_esc(dateTo)}">
+    </div>
+    <div class="adv-filter-group">
+      <label>Vendor</label>
+      <select name="oa_filter_vendor">
+        <option value="">All vendors</option>
+        ${vendorOpts}
+      </select>
+    </div>
+    <div class="adv-filter-group">
+      <label>Amount range</label>
+      <div class="adv-filter-range">
+        <input type="number" step="0.01" min="0" name="oa_filter_amount_min" value="${_esc(amountMin)}" placeholder="Min">
+        <span>–</span>
+        <input type="number" step="0.01" min="0" name="oa_filter_amount_max" value="${_esc(amountMax)}" placeholder="Max">
+      </div>
+    </div>
+    <div class="adv-filter-group">
+      <label>Subsidiary</label>
+      <select name="oa_filter_subsidiary">
+        <option value="">All subsidiaries</option>
+        ${subsidiaryOpts}
+      </select>
+    </div>
+    <button type="submit" class="btn-apply-filters">Apply</button>
+    <a href="${clearUrl}" class="btn-clear-filters">Clear filters</a>
+  </form>
 
   <div class="summary-cards">
     <div class="card">
@@ -369,7 +587,59 @@ define([
 <div class="toast" id="toast"></div>
 
 <script>
-const SELF_URL = '${selfUrl}';
+const SELF_URL       = '${selfUrl}';
+const OA_QUICK_ID     = '${_esc(quickId)}';
+const OA_QUICK_ACTION = '${_esc(quickAction)}';
+const OA_QUICK_TYPE   = '${_esc(quickType)}';
+
+// ─── Quick-action pre-fill (from portlet "quick approve" links) ───────────────
+window.addEventListener('DOMContentLoaded', () => {
+  if (!OA_QUICK_ID) return;
+
+  const row = document.querySelector('tr[data-id="' + OA_QUICK_ID + '"]');
+  if (!row) return;
+
+  // Scroll the row into view with a little breathing room
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  const sel = row.querySelector('.action-select');
+  if (!sel || sel.disabled) return;
+
+  // Determine the best matching option value.
+  // The portlet emits 'approve' or 'decline'; we map to whatever option the
+  // dropdown actually contains for this row (assigned-user vs super-approver).
+  function pickOption(hint) {
+    const opts = Array.from(sel.options).map(o => o.value).filter(Boolean);
+    if (hint === 'approve') {
+      // Prefer the direct 'approve' (assigned), fall back to 'super_approve'
+      if (opts.includes('approve'))       return 'approve';
+      if (opts.includes('super_approve')) return 'super_approve';
+    } else if (hint === 'decline') {
+      // Prefer the direct 'decline' (assigned), fall back to 'super_decline'
+      if (opts.includes('decline'))       return 'decline';
+      if (opts.includes('super_decline')) return 'super_decline';
+    }
+    // Exact match (e.g. portlet already emitted 'super_approve')
+    if (opts.includes(hint)) return hint;
+    return null;
+  }
+
+  const resolved = pickOption(OA_QUICK_ACTION);
+  if (!resolved) return;
+
+  sel.value = resolved;
+
+  // For reject actions, focus the appropriate reason input
+  if (resolved === 'decline') {
+    const reasonInput = row.querySelector('.reason-input');
+    if (reasonInput) reasonInput.focus();
+  } else if (resolved === 'super_decline') {
+    const superInput = row.querySelector('.super-reason-input');
+    if (superInput) superInput.focus();
+  }
+
+  showToast('Pre-filled action from quick approve link');
+});
 
 function setFilter(key, val) {
   const params = new URLSearchParams(window.location.search);

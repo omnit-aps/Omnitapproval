@@ -48,6 +48,23 @@ async function dismissBlockingModals(page) {
 }
 
 /**
+ * Detects the NetSuite "You have been logged out" session-expiry modal and
+ * throws a descriptive error so the test fails fast with a clear message
+ * rather than timing out 45 s later inside waitForFunction.
+ * @param {import('@playwright/test').Page} page
+ */
+async function assertNotLoggedOut(page) {
+  const logoutModal = page.locator('text=You have been logged out').first();
+  const visible = await logoutModal.isVisible().catch(() => false);
+  if (visible) {
+    throw new Error(
+      'NetSuite session expired mid-test ("You have been logged out" modal detected). ' +
+      'Re-run `npx playwright test --project=setup` to refresh the auth cookie, then retry.',
+    );
+  }
+}
+
+/**
  * Creates a basic Vendor Bill via the standard NetSuite UI.
  * Returns the saved record's internal id and approval status.
  *
@@ -64,13 +81,29 @@ async function createVendorBill(page, { vendor, account, amount, scenario }) {
   await dismissBlockingModals(page);
 
   // Vendor selection auto-fills Account / Subsidiary / Posting Period.
-  await page.locator('#entity_display').fill(vendor);
-  await page.keyboard.press('Tab');
+  // Type the vendor name slowly so the NS type-ahead dropdown appears, then
+  // pick the first matching suggestion. Falling back to Tab-blur if no popup
+  // shows (e.g. exact-match single result that resolves immediately).
+  const entityInput = page.locator('#entity_display');
+  await entityInput.clear();
+  await entityInput.pressSequentially(vendor, { delay: 80 });
+  // Wait up to 5 s for the suggestion list; if it appears, click first item.
+  const suggestionList = page.locator('div.ns-suggest-list .ns-sug-item, div[id^="_suggestions"] li, div.suggestions li').first();
+  const listVisible = await suggestionList.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false);
+  if (listVisible) {
+    await suggestionList.click();
+  } else {
+    await page.keyboard.press('Tab');
+  }
   await dismissBlockingModals(page);
+  // Wait for the read-only display span to reflect the resolved vendor name,
+  // which confirms NS has fully loaded the vendor record and auto-filled fields.
+  await page.locator('#entity_displayonly').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
+  await assertNotLoggedOut(page);
   await page.waitForFunction(() => {
     /** @type {any} */ const w = window;
     try { return Boolean(w.nlapiGetFieldValue && w.nlapiGetFieldValue('account')); } catch (_) { return false; }
-  }, null, { timeout: 30_000 });
+  }, null, { timeout: 45_000 });
   await page.locator('#popuptimeoutblocker').waitFor({ state: 'hidden' }).catch(() => {});
 
   // Body memo — sublist also has #memo on some form variants; scope by aria-label.
@@ -80,23 +113,86 @@ async function createVendorBill(page, { vendor, account, amount, scenario }) {
   // expense/item line silently aborts save (no POST). The body Amount field
   // is just a control total — not the accounting distribution. The line
   // account must differ from the body Account (NS rejects duplicate accounts).
-  const lineResult = await page.evaluate(({ account, amount }) => {
+  //
+  // Account resolution strategy:
+  //   1. Use nlapiSearchRecord (in a separate evaluate) to enumerate real Expense accounts.
+  //      Retry up to 3 times — nlapiSearchRecord makes synchronous XHR calls that
+  //      intermittently return HTML error pages in the sandbox.
+  //   2. Try to match the requested name (and a list of fallbacks) against actual names.
+  //   3. If no name matches, pick the first non-AP leaf account from the search results.
+  //   4. Set the line via nlapiSetCurrentLineItemValue(id) — avoids the unreliable
+  //      nlapiSetCurrentLineItemText typeahead which intermittently fails to resolve.
+
+  // Step A: resolve account ID (with retries, separate from line-item mutation)
+  const HARDCODED_EXPENSE_IDS = ['59', '60', '63', '146', '149', '160', '161', '162', '163', '164', '362'];
+  const fallbackNames = [
+    'Other Expenses', 'Office Supplies', 'Office Expenses', 'Travel',
+    'Telephone', 'Postage and Delivery', 'Bank Charges',
+    'Miscellaneous Expense', 'Other Expense', 'Operating Expense', 'General Expense',
+  ];
+
+  /** @type {{id:string, name:string}|null} */
+  let resolvedAccount = null;
+  let resolveLog = '';
+  for (let attempt = 0; attempt < 3 && !resolvedAccount; attempt++) {
+    if (attempt > 0) await page.waitForTimeout(1500);
+    resolvedAccount = await page.evaluate(({ account: acct, fallbacks, bodyExclusions }) => {
+      /** @type {any} */ const w = window;
+      const bodyAccountId = String(w.nlapiGetFieldValue('account') || '');
+      try {
+        if (typeof w.nlapiSearchRecord !== 'function') return null;
+        const filters = [
+          new w.nlobjSearchFilter('type', null, 'anyof', ['Expense']),
+          new w.nlobjSearchFilter('isinactive', null, 'is', 'F'),
+        ];
+        const cols = [
+          new w.nlobjSearchColumn('internalid'),
+          new w.nlobjSearchColumn('name'),
+        ];
+        const rs = w.nlapiSearchRecord('account', null, filters, cols);
+        if (!rs || rs.length === 0) return null;
+        const accounts = rs.map((/** @type {any} */ r) => ({
+          id: r.getValue('internalid'),
+          name: r.getValue('name') || '',
+        })).filter((/** @type {{id:string,name:string}} */ a) => !bodyExclusions.includes(a.id));
+        const candidates = [acct, ...fallbacks.filter((n) => n !== acct)];
+        for (const name of candidates) {
+          const lower = name.toLowerCase();
+          const match = accounts.find(
+            (a) => a.name.toLowerCase() === lower ||
+                   a.name.toLowerCase().includes(lower) ||
+                   lower.includes(a.name.toLowerCase()),
+          );
+          if (match) return match;
+        }
+        return accounts[0] || null;
+      } catch (_) { return null; }
+    }, { account, fallbacks: fallbackNames, bodyExclusions: [await page.evaluate(() => String((/** @type {any} */ (window)).nlapiGetFieldValue('account') || ''))] });
+  }
+  // If all retries failed, use hard-coded IDs from this sandbox as last resort
+  if (!resolvedAccount) {
+    const bodyId = await page.evaluate(() => String((/** @type {any} */ (window)).nlapiGetFieldValue('account') || ''));
+    const fallbackId = HARDCODED_EXPENSE_IDS.find((id) => id !== bodyId) || HARDCODED_EXPENSE_IDS[0];
+    resolvedAccount = { id: fallbackId, name: `[hardcoded id=${fallbackId}]` };
+    resolveLog = 'nlapiSearchRecord failed 3x; using hardcoded account id';
+  }
+  console.log(`[createVendorBill] account resolved: "${resolvedAccount.name}" (id=${resolvedAccount.id}, requested="${account}") ${resolveLog}`);
+
+  // Step B: add the expense line using the pre-resolved account ID (no XHR in evaluate)
+  const lineResult = await page.evaluate(({ accountId, accountName, amount }) => {
     /** @type {any} */ const w = window;
-    /** @type {Record<string, any>} */ const log = {};
+    /** @type {Record<string, any>} */ const log = { accountUsed: accountName, accountId };
     try {
       w.nlapiSelectNewLineItem('expense');
-      w.nlapiSetCurrentLineItemText('expense', 'account', account, true, true);
-      const resolved = w.nlapiGetCurrentLineItemText('expense', 'account');
-      log.accountAfter = resolved;
-      if (!resolved) { log.fatal = `Account "${account}" did not resolve`; return log; }
-      w.nlapiSetCurrentLineItemValue('expense', 'amount', String(amount), true, true);
+      w.nlapiSetCurrentLineItemValue('expense', 'account', accountId, false, false);
+      w.nlapiSetCurrentLineItemValue('expense', 'amount', String(amount), false, false);
       w.nlapiCommitLineItem('expense');
       log.lineCount = w.nlapiGetLineItemCount('expense');
     } catch (e) {
       log.fatal = e instanceof Error ? e.message : String(e);
     }
     return log;
-  }, { account, amount });
+  }, { accountId: resolvedAccount.id, accountName: resolvedAccount.name, amount });
   if (!lineResult.lineCount || lineResult.lineCount < 1) {
     throw new Error(`Could not add expense line: ${JSON.stringify(lineResult)}`);
   }
@@ -104,10 +200,13 @@ async function createVendorBill(page, { vendor, account, amount, scenario }) {
   // Save: blur active element, then click NS's actual multi-button.
   await page.evaluate(() => /** @type {HTMLElement|null} */ (document.activeElement)?.blur());
   await page.locator('#popuptimeoutblocker').waitFor({ state: 'hidden' }).catch(() => {});
+  await assertNotLoggedOut(page);
   await page.locator('#btn_multibutton_submitter').click({ force: true });
   try {
     await page.waitForURL((u) => /vendbill\.nl/.test(u.toString()) && /id=\d+/.test(u.toString()), { timeout: 60_000 });
+    await assertNotLoggedOut(page);
   } catch (e) {
+    await assertNotLoggedOut(page).catch((logoutErr) => { throw logoutErr; });
     await page.screenshot({ path: 'test-results/save-stuck.png', fullPage: true });
     throw e;
   }
@@ -122,7 +221,7 @@ async function createVendorBill(page, { vendor, account, amount, scenario }) {
   }, null, { timeout: 30_000 });
   const status = await readField(page, 'approvalstatus');
   const nextApprover = await readField(page, 'nextapprover');
-  return { id, status, nextApprover };
+  return { id, status, nextApprover, accountUsed: lineResult.accountUsed, accountId: lineResult.accountId };
 }
 
 /**
@@ -169,4 +268,41 @@ async function deleteTestRecord(page, type, id) {
   await page.locator('input[value="OK"]').first().click().catch(() => {});
 }
 
-module.exports = { createVendorBill, readField, deleteTestRecord, TEST_TAG, memoTag };
+/**
+ * Idempotently set an OA flag on an employee record (e.g. is_manager=T on psld
+ * so the dashboard shows all pending records). Uses NetSuite's nlapiSubmitField
+ * which is a server-side update — no form save cycle needed.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string|number} employeeId  Internal id of the employee record
+ * @param {string} fieldId            e.g. 'custentity_oa_is_manager'
+ * @param {string} value              'T' or 'F'
+ */
+async function setEmployeeFlag(page, employeeId, fieldId, value) {
+  await page.goto(`/app/common/entity/employee.nl?id=${employeeId}&e=T`);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(
+    (id) => {
+      /** @type {any} */ const w = window;
+      try { return typeof w.nlapiGetFieldValue === 'function' && w.nlapiGetFieldValue('id') === String(id); } catch (_) { return false; }
+    },
+    String(employeeId),
+    { timeout: 30_000 },
+  );
+  const before = await page.evaluate(
+    (f) => /** @type {any} */ (window).nlapiGetFieldValue(f),
+    fieldId,
+  );
+  if (before === value) return { changed: false, before, after: before };
+  const after = await page.evaluate(
+    ([type, id, f, v]) => {
+      /** @type {any} */ const w = window;
+      w.nlapiSubmitField(type, id, f, v);
+      return w.nlapiLookupField ? w.nlapiLookupField(type, id, f) : v;
+    },
+    /** @type {[string, string, string, string]} */ (['employee', String(employeeId), fieldId, value]),
+  );
+  return { changed: true, before, after };
+}
+
+module.exports = { createVendorBill, readField, deleteTestRecord, setEmployeeFlag, assertNotLoggedOut, TEST_TAG, memoTag };

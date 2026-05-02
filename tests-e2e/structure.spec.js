@@ -54,7 +54,16 @@ test.describe('dashboard structure', () => {
   });
 
   test('shows empty-state row when no transactions match', async ({ page }) => {
-    // Current user has 0 transactions across all filters; verify empty state.
+    // Navigate with a PO+Rejected filter combination unlikely to have rows.
+    await page.goto(`${DASHBOARD_PATH}&oa_filter_type=po&oa_filter_status=rejected`);
+    // Wait for the table body to finish rendering (either rows or the empty-state cell).
+    await page.waitForSelector('#txn-table td', { timeout: 15000 });
+    const rowCount = await page.locator('tr[data-id]').count();
+    if (rowCount > 0) {
+      // Rows exist — the empty-state can't be shown; skip rather than false-fail.
+      test.skip(true, `PO+Rejected filter returned ${rowCount} row(s); empty-state not reachable`);
+      return;
+    }
     const emptyCell = page.locator('td.empty');
     await expect(emptyCell).toBeVisible();
     await expect(emptyCell).toHaveText(/No transactions match the filter/i);

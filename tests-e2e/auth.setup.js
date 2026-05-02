@@ -1,5 +1,5 @@
 // @ts-check
-const { test, expect } = require('@playwright/test');
+const { test } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
@@ -39,11 +39,41 @@ test('authenticate', async ({ page }) => {
   await page.locator('#password, input[name="password"]').fill(password);
   await page.locator('#login-submit, button[type="submit"]').click();
 
-  // Wait for either the home dashboard to load or a 2FA prompt to appear.
-  // If 2FA appears and you're running headed, complete it manually within 2 min.
-  await expect(page).toHaveURL(/app\.netsuite\.com\/(app|core|machine)/, {
-    timeout: 120_000,
-  });
+  // NS may redirect a "new device" (Playwright's browser counts as one) to a
+  // security-questions challenge page. The user's chosen convention: the
+  // answer is the last word of the question (excluding the "?"). Handle that
+  // automatically so headless test runs don't get blocked.
+  //
+  // NOTE: The "authenticated" URL predicate must exclude /app/login paths —
+  // enterpriselogin.nl lives under /app/login/ and would otherwise match.
+  /** @param {URL} u */
+  const isAuthenticated = (u) => {
+    const s = u.toString();
+    return /app\.netsuite\.com\/(?!app\/login)(?:app|core|machine)/.test(s);
+  };
+
+  await page.waitForURL(
+    (u) => isAuthenticated(u) || /securityquestions\.nl/.test(u.toString()),
+    { timeout: 120_000 },
+  );
+
+  if (/securityquestions\.nl/.test(page.url())) {
+    const questionText = (await page.getByText(/^What\b/i).first().textContent())?.trim() || '';
+    // Strip trailing "?" and take the last word
+    const answer = questionText.replace(/\?+\s*$/, '').trim().split(/\s+/).pop() || '';
+    if (!answer) throw new Error(`Could not parse security question: "${questionText}"`);
+    console.log(`Security question: "${questionText}" → answer: "${answer}"`);
+    // "Hide Answer" checkbox makes the input type="password"; match either.
+    await page.locator('input[type="password"], input[type="text"]').first().fill(answer);
+    await page.locator('input[type="submit"], button:has-text("Submit")').first().click();
+    await page.waitForURL(isAuthenticated, { timeout: 60_000 });
+  } else if (/enterpriselogin\.nl|\/app\/login/.test(page.url())) {
+    // Ended up on enterprise login / SSO page — wait for it to redirect to the app.
+    await page.waitForURL(isAuthenticated, { timeout: 60_000 });
+  }
+
+  console.log('Post-login URL:', page.url());
+  await page.screenshot({ path: 'test-results/auth-after-login.png', fullPage: true });
 
   await page.context().storageState({ path: STATE_FILE });
 });

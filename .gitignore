@@ -1,9 +1,13 @@
 node_modules/
 .env
 .env.local
+.DS_Store
 
 # Playwright
 /test-results/
 /playwright-report/
 /playwright/.cache/
 /tests-e2e/.auth/
+
+# Recorded demo videos (preserved separately, not committed)
+*.webm
