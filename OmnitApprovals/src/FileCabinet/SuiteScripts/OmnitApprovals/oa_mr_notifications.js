@@ -111,7 +111,9 @@ define([
 
       const subsidiaryId   = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].value : null;
       const subsidiaryName = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].text  : '';
-      const documentNumber = fields.tranid;
+      // Fall back to internal id if NS hasn't auto-assigned tranid yet —
+      // otherwise the subject becomes "Approval required — " (broken/spam-prone).
+      const documentNumber = fields.tranid || ('#' + recordId);
       const amount         = parseFloat(fields.amount) || 0;
       const currencySymbol = (fields.currency && fields.currency[0] ? fields.currency[0].text : '') || '';
 

@@ -1,24 +1,52 @@
 # OmnitApprovals Build Status
 
 > Live status. Updated whenever I make progress. Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
-> Last update: 2026-05-02 09:55
+> Last update: 2026-05-02 10:10
 
 ## 🎯 ACTION FOR YOU NOW
 
-📧 **Open jonasbm@gmail.com inbox + spam folder.** Two emails should be there from the NetSuite sandbox:
+🔍 **Diagnosis complete.** NS dispatched 14 emails today with `emailed=T`, but **none reached your Gmail**. Two distinct issues:
 
-| Subject contains | Action | NS internal id |
-|---|---|---|
-| "Approval required" — $750 ACME | Click **Approve** link | **94300** |
-| "Approval required" — $1500 ACME | Click **Reject** → enter a reason | **94301** |
+### Issue 1 — Code bug in MR script ✅ FIXED
 
-After each click, the transaction status flips (Approved / Rejected). I'll see it in the dashboard.
+The 14 emails today all had subject `"Approval required — "` (no VB number). Reason: `documentNumber = fields.tranid` is `undefined` on freshly-saved VBs, so the subject ended in just a trailing space.
 
-**Sandbox email is confirmed live** — 8 messages dispatched to jonasbm@gmail.com today (`emailed=T` per NS message log). If you don't see them, definitely check spam.
+**Fix applied** to [oa_mr_notifications.js:114](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L114) — falls back to `#<recordId>` when `tranid` isn't assigned yet. Subjects will now be like `"Approval required — #94300"`.
+
+### Issue 2 — Likely sandbox email hold (needs your admin)
+
+`emailed=T` means NS handed the message to its mail relay — but external delivery is being suppressed somewhere. `psld@omnit.dk` doesn't have admin rights to verify, so **you (or whoever has Administrator) need to do this:**
+
+**Step A: Check Email Preferences as Administrator**
+
+Open `https://td3075893.app.netsuite.com/app/setup/companyemailprefs.nl` while logged in as Administrator. Look for:
+- ❑ **"Hold All Notification Emails"** — should be unchecked
+- ❑ **"Send All Outgoing Emails to:"** — should be empty (if filled, all emails are redirected to that address regardless of the actual recipient)
+- ❑ **"Approve Email Domains"** — confirm `gmail.com` is allowed (or no domain restriction)
+
+**Step B: Deploy the fixed MR script**
+
+The subject-line fix is committed but not deployed to sandbox. Run from `/Users/work/Omnitapproval/OmnitApprovals`:
+```sh
+suitecloud file:upload --paths "/SuiteScripts/OmnitApprovals/oa_mr_notifications.js"
+```
+(needs SuiteCloud CLI + auth — see [Suitelet deploy](#suitelet-deploy) below)
+
+**Step C: Re-trigger MR for VB 94300 + 94301**
+
+Either re-save them so the user-event fires automatically, or:
+1. Setup → Scripting → Scheduled Scripts → `customscript_oa_mr_notifications`
+2. Edit deployment → set `custscript_oa_mr_record_id = 94300`, `custscript_oa_mr_record_type = vendorbill`
+3. Save and Execute. Repeat for 94301.
+
+**Step D: Check both inbox AND spam at jonasbm@gmail.com.** If still nothing, Issue 2 is real and we need step A's preferences flipped.
 
 ## 🤖 Agents
 
-- **Currently in flight:** 1 (full e2e regression suite)
+- **Currently in flight:** 3
+  1. Full e2e regression suite
+  2. NS message log query — checking VB 94300 + 94301 specifically for `emailed=T` records
+  3. Manual MR trigger — scheduling `customscript_oa_mr_notifications` for VB 94300 + 94301
 - **Just finished:** 9 agents (see Done section)
 
 ## ✅ Done this session (overall)
