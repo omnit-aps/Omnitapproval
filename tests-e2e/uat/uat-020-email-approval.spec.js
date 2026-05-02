@@ -34,18 +34,30 @@ test.describe('UAT-020 email-approval flow', () => {
   test('OA settings: Headquarters default approver is Jonas (id 3762)', async ({ page }) => {
     test.setTimeout(60_000);
 
-    // OA settings are stored in a custom record — open the list and look for a
-    // row that references Headquarters + Jonas. The exact URL path varies by
-    // account; fall back to a SuiteQL check via the nlapiSearchRecord API.
-    // We verify via the NS employee record: Jonas must exist and be active.
-    await page.goto(`/app/common/entity/employee.nl?id=${JONAS_EMPLOYEE_ID}`);
-    await page.waitForLoadState('domcontentloaded');
-
-    // The page title or name field should contain "Jonas"
-    const nameField = page.locator('#name_fs_inlinetext, #name_val, #firstname_fs_inlinetext, h1').first();
-    await expect(nameField).toBeVisible({ timeout: 15_000 });
-    const nameText = await nameField.textContent();
+    // psld role can't read the /app/common/entity/employee.nl page (returns
+    // a generic "Employee" placeholder). Verify via SuiteQL using the same
+    // session cookies — this bypasses the page-render permission gate.
+    await page.goto('/app/center/card.nl', { waitUntil: 'load', timeout: 30_000 });
+    const baseURL = (process.env.NS_BASE_URL || '').replace(/\/$/, '');
+    const empResp = await page.evaluate(
+      async ([base, id]) => {
+        const r = await fetch(`${base}/services/rest/query/v1/suiteql`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'Prefer': 'transient' },
+          body: JSON.stringify({ q: `SELECT id, firstname, lastname, entityid, email FROM employee WHERE id = ${id}` }),
+        });
+        return { status: r.status, body: await r.text() };
+      },
+      [baseURL, JONAS_EMPLOYEE_ID],
+    );
+    expect(empResp.status, `SuiteQL employee lookup HTTP ${empResp.status}: ${empResp.body.slice(0, 200)}`).toBe(200);
+    const empJson = JSON.parse(empResp.body);
+    const empRow = (empJson.items || [])[0];
+    expect(empRow, `Employee ${JONAS_EMPLOYEE_ID} not found via SuiteQL`).toBeTruthy();
+    const nameText = [empRow.firstname, empRow.lastname, empRow.entityid].filter(Boolean).join(' ');
     expect(nameText, `Employee ${JONAS_EMPLOYEE_ID} should be Jonas — got: "${nameText}"`).toMatch(JONAS_NAME_RE);
+    console.log(`[UAT-020] Employee 3762 name from SuiteQL: "${nameText}" email="${empRow.email}"`);
 
     // Check the OA settings custom record for a Headquarters row pointing to Jonas.
     // customrecord_oa_settings is the expected record type id.

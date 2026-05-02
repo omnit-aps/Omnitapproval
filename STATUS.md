@@ -1,72 +1,69 @@
 # OmnitApprovals Build Status
 
 > Live status. Updated whenever I make progress. Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
-> Last update: 2026-05-02 10:10
+> Last update: 2026-05-02 16:30
 
 ## 🎯 ACTION FOR YOU NOW
 
-✅ **Recipient audit clean** — confirmed every approval email has only `jonasbm@gmail.com` on the To: line. Zero cc/bcc/leaks. So the script is doing the right thing on that front.
+**Single fastest test:** open https://mail.google.com/mail/u/0/#spam in jonasbm's account and search for `from:netsuite.com`. ~50% chance the 14 dispatched emails are sitting in spam. If they are: whitelist the sender and the email path works. If not: it's a sandbox-level external-email block (see "Root cause" below).
 
-❌ **Emails still not arriving at Gmail** — NS reports `emailed=T` (handed to mail relay) for 14 messages today, but Gmail inbox is empty.
+## 🧾 Today's diagnostic run (all evidence)
 
-### Steps so far (automated)
-
-- ✅ Subject-line bug fixed in [oa_mr_notifications.js:114](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L114)
-- ✅ Deployed via SuiteCloud (you ran `suitecloud file:upload`)
-- ✅ MR re-triggered for VB 94300 + 94301 via "touch save" (saving the VB without changes fires the after-submit which schedules the MR)
-
-### Still needs you (Full Access role required)
-
-**Open `/app/setup/companyemailprefs.nl` while logged in as the actual account owner / Full Access role** — psld@omnit.dk can't read it even with the Administrator role label. Verify:
-
-| Setting | Should be |
+| What we tested | Result |
 |---|---|
-| Hold All Notification Emails | unchecked |
-| Send All Outgoing Emails to | empty |
-| Approved Email Domains | empty or includes gmail.com |
-| Email Sender Approval | not blocking unknown senders |
+| OA `customscript_oa_mr_notifications` dispatch | ✅ 14 emails dispatched today, all `emailed=T` |
+| Recipients on each email | ✅ Only `jonasbm@gmail.com` — no cc/bcc/leaks |
+| Subject line | 🐛 `"Approval required — "` (empty after dash). Fix is in code at [oa_mr_notifications.js:116](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L116) but the deployed file may be stale OR `tranid` is non-empty-but-empty |
+| Message → VB link | 🐛 Every dispatched message has `transaction=null` — `email.send()` was missing `relatedRecords`. **Just fixed** in [oa_mr_notifications.js:233](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L233). Needs redeploy. |
+| Gmail inbox | ❌ Empty (per your check earlier) |
+| Email Preferences setup page | ❌ All 10 candidate URLs return 500 / "Page not found" for psld role — the page genuinely doesn't exist for this role, not just access-denied |
+| Message record view (`/app/crm/common/message.nl?id=…`) | ❌ Returns "Page not found" for psld — can't inspect body, links, sender |
+| VB record view (94300, 94301) | ❌ Returns nulls for `tranid`/`approvalstatus` — psld can't read these records |
 
-If any are wrong, flip them and Save. Then I'll re-trigger the MR and you'll get the emails.
+## 🧠 Root cause hypothesis (in order of likelihood)
 
-**Or** — the simpler fallback: NS sandboxes are commonly configured at the Oracle infrastructure level to suppress external email entirely (regardless of these settings). If your sandbox has that lock, the fix is to either:
-- Have NS support enable "external email" on td3075893
-- Test on production with throwaway transactions
-- Or test the email approval link by reading the email body from NS's own message log (we can do that via Playwright; the link still works as long as NS dispatched it)
+1. **Gmail spam folder** (50%) — sandbox emails from `netsuite.com` get aggressive spam filtering. Check there first.
+2. **NS sandbox external-email lock** (35%) — Oracle infrastructure-level suppression. `emailed=T` flips when NS hands the message to its internal queue, but if the sandbox is configured to drop external mail at the relay, no SMTP ever leaves. Diagnostic: NS Support ticket asking "is external email enabled on td3075893?" — typical answer is no, and they'll either enable it or instruct you to test on production.
+3. **psld role lacks Setup access** (15%) — even if external email IS enabled, we can't tweak Hold/Send-All/Whitelist settings without Administrator (real one, not the role-label). This blocks debugging but is unlikely to be the root cause since `emailed=T` happens regardless.
 
-## 🤖 Agents
+## 🔧 Code fixes from this session
 
-- **Currently in flight:** 3
-  1. Full e2e regression suite
-  2. NS message log query — checking VB 94300 + 94301 specifically for `emailed=T` records
-  3. Manual MR trigger — scheduling `customscript_oa_mr_notifications` for VB 94300 + 94301
-- **Just finished:** 9 agents (see Done section)
+| Fix | File | Status |
+|---|---|---|
+| Subject-line fallback to `#recordId` when `tranid` empty | [oa_mr_notifications.js:116](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L116) | Committed (commit `3ffc524`), deployed earlier today, but **subjects still empty** — needs redeploy verification |
+| `email.send()` missing `relatedRecords: { transactionId }` | [oa_mr_notifications.js:233](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L233) | **Just edited, not yet committed/deployed** |
 
-## ✅ Done this session (overall)
+## 📋 Test specs run today
 
-- Tier 1 e2e suite: 19 tests
-- Tier 2 UAT-006/041/046/050/051: VB creation + dashboard approve/reject flows
-- Setup specs: psld manager+super_approver, Jonas approver, OA Headquarters settings
-- Dashboard features:
-  - Approver dropdown (employees with `is_approver=T`)
-  - Document # clickable link
-  - Amount column with base-currency sub-line
-  - Settings link in topbar
-  - Filter row: date / vendor / amount / subsidiary
-- Portlet features:
-  - Inline ✓/✗ quick-action deep-links → dashboard auto-prefills action
-  - Client-side filters: vendor / amount / date / subsidiary
-- Test infra: auth setup with security-question fallback, robust VB helper with account fallback list
-- Demo video: 32s (preserved at [demo-omnit-approvals.webm](demo-omnit-approvals.webm))
+| Spec | What it verifies | Pass? |
+|---|---|---|
+| `_audit-email-recipients.spec.js` | Recipients are clean across all 14 emails today | ✅ |
+| `_check-email-prefs.spec.js` | Reads Company Email Preferences | ❌ access denied |
+| `_diagnose-email-delivery.spec.js` (new) | Probes alt prefs URLs + extracts email body | ✅ ran, both blocked by role |
 
-## 🔧 Open queue
+Output files:
+- [test-results/email-diagnosis.json](test-results/email-diagnosis.json) — structured findings
+- [test-results/email-716452-body.html](test-results/email-716452-body.html) — empty (psld can't read)
+- [playwright-report/index.html](playwright-report/index.html) — full HTML report
 
-1. Verify NS sandbox email actually sends (in flight)
-2. Create 2 test VBs for Jonas (approve + reject) (in flight)
-3. Trigger MR notifications for both VBs (in flight)
-4. Deploy updated Suitelets to sandbox — needs your help (SuiteCloud CLI auth)
-5. Commit + push to working branch `claude/playwright-e2e-setup`
+## 🚦 Next moves (ranked by reversibility / cost)
 
-## 📞 Email approval — what codex confirmed
+1. **You (30s):** check Gmail spam folder for jonasbm@gmail.com searching `from:netsuite.com`.
+2. **You (2min):** if spam is also empty, file an NS Support ticket on td3075893 asking "is external email enabled? if not, enable for our test addresses."
+3. **Me (5min):** commit the `relatedRecords` fix + redeploy via SuiteCloud, then re-trigger the MR for one VB. Verify message now links to VB.
+4. **Me (10min):** investigate why subject is empty even with the deployed fix — likely `tranid` is being read before NS auto-assigns it. Check whether `search.lookupFields('tranid')` returns `""` vs `false` vs an empty array.
+5. **Optional:** deploy a Suitelet that exposes Email Preferences read for the psld role, so we can verify settings without owner login. Higher effort, lower value than (1)-(4).
+
+## 🔢 Active test VBs
+
+| VB   | NetSuite id | Scenario      | Amount | Status          | nextApprover    |
+|------|-------------|---------------|--------|-----------------|-----------------|
+| VB-A | 94300       | EMAIL-APPROVE | 750    | Pending Approval | Jonas Test (3762) |
+| VB-B | 94301       | EMAIL-REJECT  | 1500   | Pending Approval | Jonas Test (3762) |
+
+Created: 2026-05-02 by `_seed-2-vbs-for-jonas.spec.js`. NOTE: psld role can't view these — needs Jonas's role or owner.
+
+## 📞 Email approval — what codex confirmed earlier
 
 **Trigger:** real-time async via `oa_user_event.afterSubmit` → schedules MR with VB id.
 
@@ -85,23 +82,24 @@ If any are wrong, flip them and Save. Then I'll re-trigger the MR and you'll get
 
 **Manual MR trigger:** Setup → Map/Reduce → Schedule `customscript_oa_mr_notifications` with `custscript_oa_mr_record_id=<VB id>` and `custscript_oa_mr_record_type=vendorbill`.
 
-## 🎬 What you'll do
+## ✅ Done this session (overall)
 
-1. Open jonasbm@gmail.com inbox
-2. Find 2 emails (or 1 if the sandbox de-dupes; or 0 if sandbox email is disabled)
-3. **VB-A:** click Approve link → confirm transaction status changed to Approved in NS
-4. **VB-B:** click Reject link → enter a reason → confirm transaction status changed to Rejected
-
-I'll chime 3x when both VBs are routed and email-trigger MR has fired.
-
-## 🔢 Active test VBs
-
-| VB   | NetSuite id | Scenario      | Amount | Status          | nextApprover    |
-|------|-------------|---------------|--------|-----------------|-----------------|
-| VB-A | 94300       | EMAIL-APPROVE | 750    | Pending Approval | Jonas Test (3762) |
-| VB-B | 94301       | EMAIL-REJECT  | 1500   | Pending Approval | Jonas Test (3762) |
-
-Created: 2026-05-02 by `_seed-2-vbs-for-jonas.spec.js`
+- Tier 1 e2e suite: 19 tests
+- Tier 2 UAT-006/041/046/050/051: VB creation + dashboard approve/reject flows
+- Setup specs: psld manager+super_approver, Jonas approver, OA Headquarters settings
+- Dashboard features:
+  - Approver dropdown (employees with `is_approver=T`)
+  - Document # clickable link
+  - Amount column with base-currency sub-line
+  - Settings link in topbar
+  - Filter row: date / vendor / amount / subsidiary
+- Portlet features:
+  - Inline ✓/✗ quick-action deep-links → dashboard auto-prefills action
+  - Client-side filters: vendor / amount / date / subsidiary
+- Test infra: auth setup with security-question fallback, robust VB helper with account fallback list
+- Demo video: 32s (preserved at [demo-omnit-approvals.webm](demo-omnit-approvals.webm))
+- Email-recipients audit: confirmed clean
+- Email-delivery diagnosis: identified `relatedRecords` bug + role-permission blocker
 
 ## 🧠 Model + effort
 
