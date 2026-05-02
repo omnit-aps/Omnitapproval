@@ -5,41 +5,33 @@
 
 ## 🎯 ACTION FOR YOU NOW
 
-🔍 **Diagnosis complete.** NS dispatched 14 emails today with `emailed=T`, but **none reached your Gmail**. Two distinct issues:
+✅ **Recipient audit clean** — confirmed every approval email has only `jonasbm@gmail.com` on the To: line. Zero cc/bcc/leaks. So the script is doing the right thing on that front.
 
-### Issue 1 — Code bug in MR script ✅ FIXED
+❌ **Emails still not arriving at Gmail** — NS reports `emailed=T` (handed to mail relay) for 14 messages today, but Gmail inbox is empty.
 
-The 14 emails today all had subject `"Approval required — "` (no VB number). Reason: `documentNumber = fields.tranid` is `undefined` on freshly-saved VBs, so the subject ended in just a trailing space.
+### Steps so far (automated)
 
-**Fix applied** to [oa_mr_notifications.js:114](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L114) — falls back to `#<recordId>` when `tranid` isn't assigned yet. Subjects will now be like `"Approval required — #94300"`.
+- ✅ Subject-line bug fixed in [oa_mr_notifications.js:114](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L114)
+- ✅ Deployed via SuiteCloud (you ran `suitecloud file:upload`)
+- ✅ MR re-triggered for VB 94300 + 94301 via "touch save" (saving the VB without changes fires the after-submit which schedules the MR)
 
-### Issue 2 — Likely sandbox email hold (needs your admin)
+### Still needs you (Full Access role required)
 
-`emailed=T` means NS handed the message to its mail relay — but external delivery is being suppressed somewhere. `psld@omnit.dk` doesn't have admin rights to verify, so **you (or whoever has Administrator) need to do this:**
+**Open `/app/setup/companyemailprefs.nl` while logged in as the actual account owner / Full Access role** — psld@omnit.dk can't read it even with the Administrator role label. Verify:
 
-**Step A: Check Email Preferences as Administrator**
+| Setting | Should be |
+|---|---|
+| Hold All Notification Emails | unchecked |
+| Send All Outgoing Emails to | empty |
+| Approved Email Domains | empty or includes gmail.com |
+| Email Sender Approval | not blocking unknown senders |
 
-Open `https://td3075893.app.netsuite.com/app/setup/companyemailprefs.nl` while logged in as Administrator. Look for:
-- ❑ **"Hold All Notification Emails"** — should be unchecked
-- ❑ **"Send All Outgoing Emails to:"** — should be empty (if filled, all emails are redirected to that address regardless of the actual recipient)
-- ❑ **"Approve Email Domains"** — confirm `gmail.com` is allowed (or no domain restriction)
+If any are wrong, flip them and Save. Then I'll re-trigger the MR and you'll get the emails.
 
-**Step B: Deploy the fixed MR script**
-
-The subject-line fix is committed but not deployed to sandbox. Run from `/Users/work/Omnitapproval/OmnitApprovals`:
-```sh
-suitecloud file:upload --paths "/SuiteScripts/OmnitApprovals/oa_mr_notifications.js"
-```
-(needs SuiteCloud CLI + auth — see [Suitelet deploy](#suitelet-deploy) below)
-
-**Step C: Re-trigger MR for VB 94300 + 94301**
-
-Either re-save them so the user-event fires automatically, or:
-1. Setup → Scripting → Scheduled Scripts → `customscript_oa_mr_notifications`
-2. Edit deployment → set `custscript_oa_mr_record_id = 94300`, `custscript_oa_mr_record_type = vendorbill`
-3. Save and Execute. Repeat for 94301.
-
-**Step D: Check both inbox AND spam at jonasbm@gmail.com.** If still nothing, Issue 2 is real and we need step A's preferences flipped.
+**Or** — the simpler fallback: NS sandboxes are commonly configured at the Oracle infrastructure level to suppress external email entirely (regardless of these settings). If your sandbox has that lock, the fix is to either:
+- Have NS support enable "external email" on td3075893
+- Test on production with throwaway transactions
+- Or test the email approval link by reading the email body from NS's own message log (we can do that via Playwright; the link still works as long as NS dispatched it)
 
 ## 🤖 Agents
 
