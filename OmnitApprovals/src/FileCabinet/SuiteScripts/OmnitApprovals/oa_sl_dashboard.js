@@ -27,8 +27,13 @@ define([
     const selfUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_dashboard', deploymentId: 'customdeploy_oa_sl_dashboard', returnExternalUrl: false });
     const settingsUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_settings', deploymentId: 'customdeploy_oa_sl_settings', returnExternalUrl: false });
 
-    const typeFilter   = req.parameters.oa_filter_type   || 'all';
-    const statusFilter = req.parameters.oa_filter_status || 'pending';
+    // Whitelist filter values to avoid passing junk straight into search filters.
+    const ALLOWED_TYPES = ['all', 'po', 'vb'];
+    const ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'all'];
+    const rawTypeFilter   = req.parameters.oa_filter_type   || 'all';
+    const rawStatusFilter = req.parameters.oa_filter_status || 'pending';
+    const typeFilter   = ALLOWED_TYPES.indexOf(rawTypeFilter)   >= 0 ? rawTypeFilter   : 'all';
+    const statusFilter = ALLOWED_STATUSES.indexOf(rawStatusFilter) >= 0 ? rawStatusFilter : 'pending';
 
     const dateFrom    = req.parameters.oa_filter_date_from    || '';
     const dateTo      = req.parameters.oa_filter_date_to      || '';
@@ -44,12 +49,21 @@ define([
     const quickId     = req.parameters.oa_quick_id     || '';
     const quickType   = req.parameters.oa_quick_type   || '';
 
-    let isSuperApprover = false, isManager = false;
+    let isApprover = false, isSuperApprover = false, isManager = false;
     try {
-      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
+      const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_APPROVER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER, C.FIELDS.EMPLOYEE.IS_MANAGER] });
+      isApprover      = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_APPROVER]);
       isSuperApprover = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER]);
       isManager       = utils.parseBool(emp[C.FIELDS.EMPLOYEE.IS_MANAGER]);
     } catch (e) { /* graceful */ }
+
+    // Access guard: only employees flagged as approver/manager/super_approver
+    // can view the dashboard. Without this, anyone with role audience access
+    // (allroles=T) could see pending records — even if they had no role in OA.
+    if (!isApprover && !isManager && !isSuperApprover) {
+      resp.write(`<!DOCTYPE html><html><head><title>Access denied</title></head><body style="font-family:sans-serif;padding:48px;text-align:center"><h1>Access denied</h1><p>You are not configured as an approver, manager, or super approver. Contact your Omnit Approvals administrator.</p></body></html>`);
+      return;
+    }
 
     const approvers    = loadActiveApprovers();
     const vendors      = loadVendorList();
@@ -88,6 +102,33 @@ define([
     const results = actions.map(a => {
       try {
         let result;
+        // Per-action privilege check — defence in depth on top of the
+        // role-level guard above. Without this, a crafted POST could let
+        // a base approver issue super_approve/super_decline/reset/reassign.
+        const isAssignedToThisRecord = (() => {
+          try {
+            const f = search.lookupFields({ type: a.recordType, id: a.recordId, columns: ['custbody_oa_next_approver'] });
+            const next = f.custbody_oa_next_approver;
+            const nextId = Array.isArray(next) && next[0] ? String(next[0].value) : '';
+            return nextId === String(userId);
+          } catch (e) { return false; }
+        })();
+        if (a.action === 'approve' || a.action === 'decline') {
+          if (!isAssignedToThisRecord && !isSuperApprover) {
+            return { success: false, message: 'You are not the assigned approver for this record.' };
+          }
+        } else if (a.action === 'super_approve' || a.action === 'super_decline') {
+          if (!isSuperApprover) {
+            return { success: false, message: 'Super approver privilege required.' };
+          }
+        } else if (a.action === 'reassign' || a.action === 'reset') {
+          if (!isManager) {
+            return { success: false, message: 'Manager privilege required to reassign or reset.' };
+          }
+        } else {
+          return { success: false, message: `Unknown action '${a.action}'.` };
+        }
+
         if (a.action === 'approve') {
           result = engine.processApproval(a.recordId, a.recordType, userId);
         } else if (a.action === 'decline') {
@@ -494,7 +535,7 @@ define([
   <span class="topbar-logo">OMNI:T</span>
   <span class="topbar-sep">›</span>
   <span class="topbar-title">Omnit Approvals — Bulk Approval</span>
-  <a href="${settingsUrl}" class="topbar-settings">Settings</a>
+  <a href="${_esc(settingsUrl)}" class="topbar-settings">Settings</a>
 </div>
 <div class="main">
   <div class="page-header">
@@ -604,7 +645,9 @@ define([
 
   ${(() => {
     if (totalPages <= 1) return '';
-    const baseQs = `script=customscript_oa_sl_dashboard&deploy=customdeploy_oa_sl_dashboard` +
+    // Derive pagination URLs from selfUrl (already has '?script=...&deploy=...')
+    // rather than reconstructing the route.
+    const filterQs =
       `&oa_filter_status=${encodeURIComponent(statusFilter)}` +
       `&oa_filter_type=${encodeURIComponent(typeFilter)}` +
       (dateFrom    ? `&oa_filter_date_from=${encodeURIComponent(dateFrom)}` : '') +
@@ -617,9 +660,10 @@ define([
     const pageLinks = [];
     for (let p = 0; p < totalPages; p++) {
       const cls = p === page ? 'page-link active' : 'page-link';
-      pageLinks.push(`<a class="${cls}" href="${_esc('/app/site/hosting/scriptlet.nl?' + baseQs + '&oa_page=' + p)}">${p + 1}</a>`);
+      pageLinks.push(`<a class="${cls}" href="${_esc(selfUrl + filterQs + '&oa_page=' + p)}">${p + 1}</a>`);
     }
-    const showing = `${page * 50 + 1}–${Math.min((page + 1) * 50, totalRows)} of ${totalRows}`;
+    const PAGE_SIZE_CONST = 50;
+    const showing = `${page * PAGE_SIZE_CONST + 1}–${Math.min((page + 1) * PAGE_SIZE_CONST, totalRows)} of ${totalRows}`;
     return `<div class="pagination"><span class="page-meta">Showing ${showing}</span>${pageLinks.join('')}</div>`;
   })()}
 
