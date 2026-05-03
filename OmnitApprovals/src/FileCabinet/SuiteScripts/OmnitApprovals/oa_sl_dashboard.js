@@ -36,6 +36,9 @@ define([
     const amountMin   = req.parameters.oa_filter_amount_min   || '';
     const amountMax   = req.parameters.oa_filter_amount_max   || '';
     const subsidiaryId = req.parameters.oa_filter_subsidiary  || '';
+    const approverId   = req.parameters.oa_filter_approver    || '';
+    const page         = Math.max(0, parseInt(req.parameters.oa_page || '0', 10) || 0);
+    const PAGE_SIZE    = 50;
 
     const quickAction = req.parameters.oa_quick_action || '';
     const quickId     = req.parameters.oa_quick_id     || '';
@@ -51,8 +54,12 @@ define([
     const approvers    = loadActiveApprovers();
     const vendors      = loadVendorList();
     const subsidiaries = loadSubsidiaryList();
-    const rows = loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId);
-    resp.write(renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries));
+    const allRows = loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, approverId);
+    const totalRows = allRows.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages - 1);
+    const rows = allRows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+    resp.write(renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries, approverId, safePage, totalPages, totalRows));
   }
 
   // ─── Batch POST ───────────────────────────────────────────────────────────────
@@ -116,7 +123,7 @@ define([
 
   // ─── Data loading ─────────────────────────────────────────────────────────────
 
-  function loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId) {
+  function loadPendingTransactions(userId, typeFilter, statusFilter, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, approverId) {
     let isManager = false, isSuperApprover = false;
     try {
       const emp = search.lookupFields({ type: 'employee', id: userId, columns: [C.FIELDS.EMPLOYEE.IS_MANAGER, C.FIELDS.EMPLOYEE.IS_SUPER_APPROVER] });
@@ -165,6 +172,10 @@ define([
 
     if (subsidiaryId) {
       filters.push('AND', ['subsidiary', 'anyof', [subsidiaryId]]);
+    }
+
+    if (approverId) {
+      filters.push('AND', ['custbody_oa_next_approver', 'anyof', [approverId]]);
     }
 
     const rows = [];
@@ -242,26 +253,21 @@ define([
   // ─── Vendor list for filter dropdown ─────────────────────────────────────────
 
   function loadVendorList() {
-    const seen = {};
     const vendors = [];
     try {
       search.create({
-        type: 'transaction',
-        filters: [
-          ['type', 'anyof', 'PurchOrd', 'VendBill'],
-          'AND', ['custbody_oa_routed', 'is', 'T'],
-          'AND', ['approvalstatus', 'is', '1'],
-          'AND', ['mainline', 'is', 'T']
-        ],
+        type: 'vendor',
+        filters: [['isinactive', 'is', 'F']],
         columns: [
-          { name: 'entity' },
-          { name: 'entitynohierarchy' }
-        ]
+          { name: 'internalid' },
+          { name: 'entityid' },
+          { name: 'companyname' },
+        ],
       }).run().each(r => {
-        const id   = r.getValue('entity');
-        const name = r.getText('entity') || r.getValue('entitynohierarchy') || id;
-        if (id && !seen[id]) { seen[id] = true; vendors.push({ id, name }); }
-        return true;
+        const id   = r.id;
+        const name = r.getValue('companyname') || r.getValue('entityid') || id;
+        vendors.push({ id, name });
+        return vendors.length < 1000; // safety cap; large NS accounts can have 10k+ vendors
       });
       vendors.sort((a, b) => a.name.localeCompare(b.name));
     } catch (e) { /* graceful — return empty list */ }
@@ -271,28 +277,18 @@ define([
   // ─── Subsidiary list for filter dropdown ─────────────────────────────────────
 
   function loadSubsidiaryList() {
-    const seen = {};
     const subs = [];
     try {
       search.create({
-        type: 'transaction',
-        filters: [
-          ['type', 'anyof', 'PurchOrd', 'VendBill'],
-          'AND', ['custbody_oa_routed', 'is', 'T'],
-          'AND', ['approvalstatus', 'is', '1'],
-          'AND', ['mainline', 'is', 'T']
-        ],
-        columns: [
-          { name: 'subsidiary' }
-        ]
+        type: 'subsidiary',
+        filters: [['isinactive', 'is', 'F']],
+        columns: [{ name: 'internalid' }, { name: 'name' }],
       }).run().each(r => {
-        const id   = r.getValue('subsidiary');
-        const name = r.getText('subsidiary') || id;
-        if (id && !seen[id]) { seen[id] = true; subs.push({ id, name }); }
+        subs.push({ id: r.id, name: r.getValue('name') || r.id });
         return true;
       });
       subs.sort((a, b) => a.name.localeCompare(b.name));
-    } catch (e) { /* graceful — return empty list */ }
+    } catch (e) { /* graceful — return empty list (e.g. SUBSIDIARIES feature off) */ }
     return subs;
   }
 
@@ -304,7 +300,7 @@ define([
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries) {
+  function renderDashboard(rows, selfUrl, settingsUrl, typeFilter, statusFilter, userId, isSuperApprover, isManager, approvers, quickAction, quickId, quickType, dateFrom, dateTo, vendorId, amountMin, amountMax, subsidiaryId, vendors, subsidiaries, approverId, page, totalPages, totalRows) {
     // Feature 1: build approver <select> options once, reused per row
     const approverOpts = (approvers || []).map(a =>
       `<option value="${_esc(a.id)}">${_esc(a.name)}</option>`
@@ -314,12 +310,18 @@ define([
     const vendorOpts = (vendors || []).map(v =>
       `<option value="${_esc(v.id)}"${vendorId === String(v.id) ? ' selected' : ''}>${_esc(v.name)}</option>`
     ).join('');
+    // Approver filter dropdown — same data as reassign approverOpts but with `selected` based on the URL filter param
+    const approverFilterOpts = (approvers || []).map(a =>
+      `<option value="${_esc(a.id)}"${String(approverId) === String(a.id) ? ' selected' : ''}>${_esc(a.name)}</option>`
+    ).join('');
     const subsidiaryOpts = (subsidiaries || []).map(s =>
       `<option value="${_esc(s.id)}"${subsidiaryId === String(s.id) ? ' selected' : ''}>${_esc(s.name)}</option>`
     ).join('');
 
     // Build "clear filters" URL — strip all oa_filter_* params except status/type chips
-    const clearUrl = `${_esc(selfUrl)}?oa_filter_status=${_esc(statusFilter)}&amp;oa_filter_type=${_esc(typeFilter)}`;
+    // selfUrl already has '?script=...&deploy=...' — append filter params with '&', not '?'.
+    // _esc() turns '&' into '&amp;' for HTML safety since this lands in an href attribute.
+    const clearUrl = _esc(`${selfUrl}&oa_filter_status=${statusFilter}&oa_filter_type=${typeFilter}`);
 
     // Feature 2: map record type to NS transaction URL segment
     function txnUrl(type, id) {
@@ -361,17 +363,23 @@ define([
         // Regular approver not assigned to this record — no actionable options
         actionOptions = `<option value="">— Not your record —</option>`;
       }
-      const inputCell = !isPending
-        ? ''
-        : isAssigned
-          ? `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-          : isSuperApprover
-            ? `<input type="text" class="super-reason-input" data-id="${_esc(r.id)}" placeholder="Override justification (required)" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`
-            : (isManager
-                ? (approverOpts
-                    ? `<select class="reassign-input" data-id="${_esc(r.id)}" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff"><option value="">— Select approver —</option>${approverOpts}</select>`
-                    : `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">`)
-                : '');
+      // Input cell: render every input the user might need based on privilege.
+      // CSS `.input-stack > *:not(:first-child){margin-top:4px}` stacks them.
+      // JS in submitBatch reads only the input matching the chosen action.
+      // Inputs not relevant to the chosen action are simply blank/ignored.
+      const inputStyle = 'width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px';
+      const reassignField = approverOpts
+        ? `<select class="reassign-input" data-id="${_esc(r.id)}" style="${inputStyle};background:#fff"><option value="">— Select approver —</option>${approverOpts}</select>`
+        : `<input type="text" class="reassign-input" data-id="${_esc(r.id)}" placeholder="New approver employee ID" style="${inputStyle}">`;
+      const reasonField = `<input type="text" class="reason-input" data-id="${_esc(r.id)}" placeholder="Reason (required for rejection)" style="${inputStyle}">`;
+      const superReasonField = `<input type="text" class="super-reason-input" data-id="${_esc(r.id)}" placeholder="Override justification (required)" style="${inputStyle}">`;
+      let inputs = '';
+      if (isPending) {
+        if (isAssigned) inputs += reasonField;
+        if (isSuperApprover) inputs += superReasonField;
+        if (isManager) inputs += reassignField;
+      }
+      const inputCell = inputs ? `<div class="input-stack">${inputs}</div>` : '';
       return `
       <tr data-id="${_esc(r.id)}" data-type="${_esc(r.type)}">
         <td>
@@ -382,7 +390,7 @@ define([
         <td>${inputCell}</td>
         <td><span class="badge ${r.typeLabel === 'Purchase Order' ? 'badge-blue' : 'badge-purple'}">${_esc(r.typeLabel)}</span></td>
         <td class="fw500">${_esc(r.entity) || '—'}</td>
-        <td class="mono"><a href="${_esc(txnUrl(r.type, r.id))}" target="_blank" rel="noopener" style="color:#1565c0;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${_esc(r.tranid)}</a></td>
+        <td class="mono"><a href="${_esc(txnUrl(r.type, r.id))}" target="_blank" rel="noopener" style="color:#1565c0;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${_esc(r.tranid || `#${r.id}`)}</a></td>
         <td>${_esc(r.currency)}</td>
         <td>${_esc(r.subsidiary)}</td>
         <td class="amount">${_esc(r.currency)} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}${
@@ -450,6 +458,13 @@ define([
   .badge-purple{background:#f3e5f5;color:#6a1b9a}
   .action-select{padding:6px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;background:#fff;cursor:pointer;min-width:160px}
   .action-select:focus{border-color:#c74634;outline:none}
+  .input-stack > *{display:block;width:100%}
+  .input-stack > * + *{margin-top:4px}
+  .pagination{display:flex;align-items:center;gap:6px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap}
+  .pagination .page-meta{color:#888;font-size:13px;margin-right:auto}
+  .pagination .page-link{display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:#312d2a;font-size:13px;background:#fff}
+  .pagination .page-link:hover{background:#f4f4f4}
+  .pagination .page-link.active{background:#c74634;color:#fff;border-color:#c74634;font-weight:600}
   .empty{color:#bbb;text-align:center;padding:40px!important}
   .fw500{font-weight:500}
   .mono{font-family:monospace;font-size:13px}
@@ -507,6 +522,8 @@ define([
   </div>
 
   <form id="adv-filter-form" method="GET" action="${_esc(selfUrl)}" class="adv-filters">
+    <input type="hidden" name="script" value="customscript_oa_sl_dashboard">
+    <input type="hidden" name="deploy" value="customdeploy_oa_sl_dashboard">
     <input type="hidden" name="oa_filter_status" value="${_esc(statusFilter)}">
     <input type="hidden" name="oa_filter_type"   value="${_esc(typeFilter)}">
     <div class="adv-filter-group">
@@ -537,6 +554,13 @@ define([
       <select name="oa_filter_subsidiary">
         <option value="">All subsidiaries</option>
         ${subsidiaryOpts}
+      </select>
+    </div>
+    <div class="adv-filter-group">
+      <label>Approver</label>
+      <select name="oa_filter_approver">
+        <option value="">All approvers</option>
+        ${approverFilterOpts}
       </select>
     </div>
     <button type="submit" class="btn-apply-filters">Apply</button>
@@ -577,6 +601,27 @@ define([
       </table>
     </div>
   </div>
+
+  ${(() => {
+    if (totalPages <= 1) return '';
+    const baseQs = `script=customscript_oa_sl_dashboard&deploy=customdeploy_oa_sl_dashboard` +
+      `&oa_filter_status=${encodeURIComponent(statusFilter)}` +
+      `&oa_filter_type=${encodeURIComponent(typeFilter)}` +
+      (dateFrom    ? `&oa_filter_date_from=${encodeURIComponent(dateFrom)}` : '') +
+      (dateTo      ? `&oa_filter_date_to=${encodeURIComponent(dateTo)}` : '') +
+      (vendorId    ? `&oa_filter_vendor=${encodeURIComponent(vendorId)}` : '') +
+      (amountMin   ? `&oa_filter_amount_min=${encodeURIComponent(amountMin)}` : '') +
+      (amountMax   ? `&oa_filter_amount_max=${encodeURIComponent(amountMax)}` : '') +
+      (subsidiaryId? `&oa_filter_subsidiary=${encodeURIComponent(subsidiaryId)}` : '') +
+      (approverId  ? `&oa_filter_approver=${encodeURIComponent(approverId)}` : '');
+    const pageLinks = [];
+    for (let p = 0; p < totalPages; p++) {
+      const cls = p === page ? 'page-link active' : 'page-link';
+      pageLinks.push(`<a class="${cls}" href="${_esc('/app/site/hosting/scriptlet.nl?' + baseQs + '&oa_page=' + p)}">${p + 1}</a>`);
+    }
+    const showing = `${page * 50 + 1}–${Math.min((page + 1) * 50, totalRows)} of ${totalRows}`;
+    return `<div class="pagination"><span class="page-meta">Showing ${showing}</span>${pageLinks.join('')}</div>`;
+  })()}
 
   <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
     <button class="btn-secondary" onclick="resetAll()">Reset</button>

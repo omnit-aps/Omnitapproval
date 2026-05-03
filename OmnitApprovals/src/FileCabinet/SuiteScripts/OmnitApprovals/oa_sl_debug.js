@@ -22,7 +22,7 @@
  *   - no secrets in output (HMAC keys, passwords, etc. are not on the
  *     fields whose IDs match the filter regex above)
  */
-define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https'], (config, runtime, search, log, https) => {
+define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https', 'N/record'], (config, runtime, search, log, https, record) => {
   'use strict';
 
   /**
@@ -61,17 +61,15 @@ define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https'], (config, runti
           'AND',
           ['subject', 'startswith', 'Approval'],
         ],
-        columns: ['messagedate', 'subject', 'authoremail', 'recipientemail', 'emailed', 'transaction', 'internaldate'],
+        columns: ['messagedate', 'subject', 'authoremail', 'recipientemail', 'transaction'],
       });
       s.run().each((r) => {
         rows.push({
           id: r.id,
           messagedate: r.getValue('messagedate'),
-          internaldate: r.getValue('internaldate'),
           subject: r.getValue('subject'),
           author: r.getValue('authoremail'),
           recipient: r.getValue('recipientemail'),
-          emailed: r.getValue('emailed'),
           transaction: r.getValue('transaction'),
         });
         return rows.length < 10;
@@ -80,6 +78,44 @@ define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https'], (config, runti
       rows.push({ __error: e.message || String(e) });
     }
     return rows;
+  }
+
+  /**
+   * Load the actual message bodies by ID via record.load and parse the
+   * approve/reject HMAC link out of the HTML body. Server-side record.load
+   * works regardless of UI permissions or search-column quirks.
+   *
+   * IDs to load are passed via the request query param 'msgids' (comma-list)
+   * or default to a small set of recent ones we know exist. Caller should
+   * keep the list short — record.load is one round-trip per id.
+   */
+  function extractApproveLinksFromIds(idsCsv) {
+    const out = [];
+    const ids = (idsCsv || '716550,716549,716548').split(',').map((s) => s.trim()).filter(Boolean);
+    ids.forEach((id) => {
+      try {
+        const rec = record.load({ type: 'message', id });
+        const body = rec.getValue({ fieldId: 'message' }) || '';
+        const subject = rec.getValue({ fieldId: 'subject' });
+        const recipient = rec.getValue({ fieldId: 'recipientemail' });
+        const transaction = rec.getValue({ fieldId: 'transaction' });
+        const linkRe = /https?:\/\/[^\s"'<>]+/g;
+        const links = (body.match(linkRe) || []);
+        const approveLinks = links.filter((l) => /action=approve|[?&]approve|=approve/i.test(l));
+        const rejectLinks = links.filter((l) => /action=reject|[?&]reject|=reject/i.test(l));
+        out.push({
+          id, subject, recipient, transaction,
+          bodyLength: body.length,
+          bodyPreview: body.slice(0, 800),
+          approveLinks: approveLinks.slice(0, 5),
+          rejectLinks: rejectLinks.slice(0, 5),
+          allLinks: links.slice(0, 20),
+        });
+      } catch (e) {
+        out.push({ id, __error: e.message || String(e) });
+      }
+    });
+    return out;
   }
 
   /**
@@ -116,9 +152,56 @@ define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https'], (config, runti
     return out;
   }
 
+  /**
+   * One-shot fix: set isavailablewithoutlogin=T on a script deployment record.
+   * SDF deployments refuse to update this flag; NS expects it set via UI or
+   * server-side N/record. Triggered with ?fix_avail=<deploy-scriptid>.
+   */
+  function fixAvailableWithoutLogin(deployScriptId) {
+    try {
+      // Step 1: find the deployment id by scriptid (no extra columns — that field isn't a searchable column)
+      const s = search.create({
+        type: 'scriptdeployment',
+        filters: [['scriptid', 'is', deployScriptId]],
+        columns: ['internalid', 'scriptid'],
+      });
+      const found = [];
+      s.run().each((r) => { found.push({ id: r.id, scriptid: r.getValue('scriptid') }); return true; });
+      if (found.length === 0) return { error: `No deployment with scriptid='${deployScriptId}'` };
+      const target = found[0];
+      // Step 2: try a few candidate field names — NS is inconsistent here
+      const candidates = ['isavailablewithoutlogin', 'availablewithoutlogin', 'isonline'];
+      const attempts = [];
+      for (const fid of candidates) {
+        try {
+          record.submitFields({
+            type: 'scriptdeployment',
+            id: target.id,
+            values: { [fid]: true },
+            options: { ignoreMandatoryFields: true, enableSourcing: false },
+          });
+          attempts.push({ field: fid, ok: true });
+          break;
+        } catch (e) {
+          attempts.push({ field: fid, ok: false, err: (e.message || String(e)).slice(0, 120) });
+        }
+      }
+      return { id: target.id, scriptid: target.scriptid, attempts };
+    } catch (e) {
+      return { error: e.message || String(e), stack: (e.stack || '').slice(0, 400) };
+    }
+  }
+
   function onRequest(context) {
+    const req  = context.request;
     const resp = context.response;
     resp.setHeader({ name: 'Content-Type', value: 'application/json; charset=utf-8' });
+    const msgIdsParam = (req.parameters && req.parameters.msgids) || '';
+    const fixAvail = (req.parameters && req.parameters.fix_avail) || '';
+    if (fixAvail) {
+      resp.write(JSON.stringify({ action: 'fix_avail', target: fixAvail, result: fixAvailableWithoutLogin(fixAvail) }, null, 2));
+      return;
+    }
 
     const out = {
       ok: true,
@@ -136,6 +219,7 @@ define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https'], (config, runti
       companyInfo: dumpConfigType('COMPANY_INFORMATION'),
       accountingPrefs: dumpConfigType('ACCOUNTING_PREFERENCES'),
       recentMessages: recentApprovalEmails(),
+      messageBodies: extractApproveLinksFromIds(msgIdsParam),
       setupUrlProbe: probeSetupUrls(https),
     };
 

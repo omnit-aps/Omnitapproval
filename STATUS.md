@@ -1,11 +1,31 @@
 # OmnitApprovals Build Status
 
-> Live status. Updated whenever I make progress. Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
-> Last update: 2026-05-02 16:30
+> Live status. Updated whenever I make progress (auto-loop fires every 10 min). Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
+> Last update: 2026-05-02 17:04
 
 ## 🎯 ACTION FOR YOU NOW
 
-**Single fastest test:** open https://mail.google.com/mail/u/0/#spam in jonasbm's account and search for `from:netsuite.com`. ~50% chance the 14 dispatched emails are sitting in spam. If they are: whitelist the sender and the email path works. If not: it's a sandbox-level external-email block (see "Root cause" below).
+**Two parallel asks:**
+
+1. **Open https://mail.google.com/mail/u/0/#spam** in jonasbm's account, search `from:netsuite.com`. The 14 emails dispatched today might be sitting in spam — if so, whitelist netsuite.com and we're done.
+2. **Watch for new emails arriving NOW** — VB 94319 was just created and the MR fired with the post-deploy fixes. Subject should read `Approval required — #94319`. If this one arrives but earlier ones didn't, the empty-subject was actually the cause (Gmail likely scored empty-subject mail as spam).
+
+## ✅ Just verified (2026-05-02 17:00)
+
+Both `oa_mr_notifications.js` fixes are LIVE in td3075893:
+
+| Fix | Evidence | Status |
+|---|---|---|
+| Subject contains record id | Msg 716550 subject = `Approval required — #94319` (pre-fix was empty) | ✅ |
+| Message linked to VB | Msg 716550 has `transaction=94319` (pre-fix was `null`) | ✅ |
+
+Verified via fresh UAT-020 run + SuiteQL inspection of message 716550 (most-recent dispatched today). The two messages dispatched immediately before (716549, 716548) still show `transaction=null` because they pre-date the deploy.
+
+## 🚀 In-flight now
+
+- **Deploying `oa_sl_debug.js` Suitelet** via `suitecloud project:deploy` (this gives us programmatic read of Email Preferences as Administrator). Started 17:04.
+- **Probe spec waiting** at [_check-email-prefs-debug.spec.js](tests-e2e/uat/_check-email-prefs-debug.spec.js) — runs once Suitelet is live.
+- **STATUS.md auto-updater** — cron job 885e61af, fires every 10 min at minute 4/14/24/34/44/54.
 
 ## 🧾 Today's diagnostic run (all evidence)
 
