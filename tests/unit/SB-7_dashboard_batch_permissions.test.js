@@ -60,6 +60,7 @@ function buildDashboard({ assignedToActor }) {
     'N/runtime': makeRuntimeMock({ getCurrentUser: () => ({ id: ACTOR_ID, role: 3 }) }),
     'N/search':  search,
     'N/url':     { resolveScript: () => '/app/site/url' },
+    'N/format':  { Type: { DATE: 'date' }, format: ({ value }) => (value && value.toISOString ? value.toISOString().slice(0, 10) : String(value)) },
     // lib/oa_utils.js (transitively required) needs N/crypto + N/encode.
     'N/crypto':  { createHash: () => ({ update: () => {}, digest: () => '' }), HashAlg: { SHA256: 'SHA256' }, Encoding: { HEX: 'HEX' } },
     'N/encode':  { Encoding: { UTF_8: 'UTF_8', BASE_64: 'BASE_64' }, convert: ({ string }) => string },
