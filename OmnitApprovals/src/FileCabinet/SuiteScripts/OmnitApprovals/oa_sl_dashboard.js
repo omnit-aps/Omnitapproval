@@ -183,6 +183,8 @@ define([
       'AND',
       ['approvalstatus', 'anyof', approvalStatuses],
       'AND',
+      ['mainline', 'is', 'T'],
+      'AND',
       [C.FIELDS.TRANSACTION.SUBMITTED_BY, 'noneof', ['@NONE@']]
     ];
 
@@ -228,7 +230,7 @@ define([
         'amount', 'approvalstatus', 'custbody_oa_next_approver',
         C.FIELDS.TRANSACTION.SUBMITTED_BY,
         C.FIELDS.TRANSACTION.BASE_AMOUNT,
-        { name: 'datecreated' }
+        { name: 'datecreated', sort: search.Sort.DESC }
       ]
     }).run().each(r => {
       const approvalStatus = r.getValue('approvalstatus');

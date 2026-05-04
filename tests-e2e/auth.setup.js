@@ -18,7 +18,8 @@ const STATE_FILE = path.join(AUTH_DIR, 'state.json');
  * The session cookie that gets saved will skip 2FA on subsequent test runs
  * until it expires.
  */
-test('authenticate', async ({ page }) => {
+test('authenticate', async ({ page, context }) => {
+  test.setTimeout(180_000);
   const baseURL = process.env.NS_BASE_URL;
   const email = process.env.NS_EMAIL;
   const password = process.env.NS_PASSWORD;
@@ -31,6 +32,28 @@ test('authenticate', async ({ page }) => {
   }
 
   fs.mkdirSync(AUTH_DIR, { recursive: true });
+
+  // FAST PATH: if a saved state.json exists, try it first. If the cookie is
+  // still valid we skip the login + security-question dance entirely. This is
+  // critical because NS rotates between several security questions and each
+  // login attempt can hit one we don't have a programmable answer for.
+  if (fs.existsSync(STATE_FILE)) {
+    try {
+      const ctx = await page.context().browser().newContext({ storageState: STATE_FILE });
+      const probe = await ctx.newPage();
+      const resp = await probe.goto(`${baseURL}/app/center/card.nl`, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => null);
+      const url = probe.url();
+      const isAuth = resp && resp.ok() && /app\.netsuite\.com\/(?!app\/login)(?:app|core|machine)/.test(url);
+      await ctx.close();
+      if (isAuth) {
+        console.log('Existing state.json still valid — skipping fresh login.');
+        return;
+      }
+      console.log('state.json present but expired — falling through to login.');
+    } catch (e) {
+      console.log('state.json probe failed; will re-auth:', e.message);
+    }
+  }
 
   await page.goto(baseURL);
 
@@ -58,8 +81,28 @@ test('authenticate', async ({ page }) => {
   );
 
   if (/securityquestions\.nl/.test(page.url())) {
-    const questionText = (await page.getByText(/^What\b/i).first().textContent())?.trim() || '';
-    // Strip trailing "?" and take the last word
+    // NS rotates between several question phrasings ("What was…", "In what city…",
+    // "Where did…"). Match the cell next to the "Question:" label rather than a
+    // single hard-coded prefix.
+    let questionText = '';
+    const questionCell = page.locator('td:has-text("Question:") + td, td:right-of(:text("Question:"))').first();
+    const cellVisible = await questionCell.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false);
+    if (cellVisible) {
+      questionText = (await questionCell.textContent())?.trim() || '';
+    }
+    if (!questionText) {
+      // Fallback: pick the longest text node ending in "?" — the actual question
+      // is the longest "?"-terminated string on this page.
+      questionText = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('td, p, div, span'));
+        const qs = all.map(el => (el.textContent || '').trim()).filter(t => /\?$/.test(t) && t.length < 200);
+        qs.sort((a, b) => b.length - a.length);
+        return qs[0] || '';
+      });
+    }
+    if (!questionText) throw new Error('Could not locate security question on page');
+    // The user's convention for these test accounts: answer is the last word of the question
+    // (case-insensitive, with the trailing "?" stripped).
     const answer = questionText.replace(/\?+\s*$/, '').trim().split(/\s+/).pop() || '';
     if (!answer) throw new Error(`Could not parse security question: "${questionText}"`);
     console.log(`Security question: "${questionText}" → answer: "${answer}"`);
