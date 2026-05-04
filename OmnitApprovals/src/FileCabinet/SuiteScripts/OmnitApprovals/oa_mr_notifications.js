@@ -111,7 +111,14 @@ define([
 
       const subsidiaryId   = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].value : null;
       const subsidiaryName = fields.subsidiary && fields.subsidiary[0] ? fields.subsidiary[0].text  : '';
-      const documentNumber = fields.tranid;
+      // Fall back to internal id if NS hasn't auto-assigned tranid yet —
+      // otherwise the subject becomes "Approval required — " (broken/spam-prone).
+      // Triple guard: trim whitespace from tranid; coerce recordId to string;
+      // last-resort reduceContext.key (which map() writes from item.recordId).
+      const tranidStr   = String(fields.tranid || '').trim();
+      const idStr       = String(recordId || reduceContext.key || '').trim();
+      const documentNumber = tranidStr || (idStr ? '#' + idStr : 'Unknown');
+      log.audit('OA MR subject inputs', { recordId, key: reduceContext.key, tranid: fields.tranid, documentNumber });
       const amount         = parseFloat(fields.amount) || 0;
       const currencySymbol = (fields.currency && fields.currency[0] ? fields.currency[0].text : '') || '';
 
@@ -227,7 +234,8 @@ define([
         recipients: [approverEmail],
         subject:    emailSubject,
         body:       htmlBody,
-        isHtml:     true
+        isHtml:     true,
+        relatedRecords: { transactionId: parseInt(recordId, 10) }
       };
       if (pdfFile) emailParams.attachments = [pdfFile];
 

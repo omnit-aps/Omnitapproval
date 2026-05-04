@@ -852,6 +852,10 @@ define([
     const breadcrumb = listUrl
       ? `<a href="${listUrl}" class="topbar-link">Omnit Approvals</a><span class="topbar-sep">›</span><span class="topbar-title">Settings</span>`
       : `<span class="topbar-title">Omnit Approvals › Settings</span>`;
+    let dashboardUrl = '';
+    try {
+      dashboardUrl = url.resolveScript({ scriptId: 'customscript_oa_sl_dashboard', deploymentId: 'customdeploy_oa_sl_dashboard', returnExternalUrl: false });
+    } catch (e) { /* graceful — link omitted if dashboard not deployed */ }
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -927,6 +931,7 @@ ${jsUrl ? `<script src="${jsUrl}"><\/script>` : ''}
   <span class="topbar-logo">OMNI:T</span>
   <span class="topbar-sep">›</span>
   ${breadcrumb}
+  ${dashboardUrl ? `<a href="${dashboardUrl}" class="topbar-link" style="margin-left:auto">Bulk Approval ›</a>` : ''}
 </div>
 <div class="main">${body}</div>
 <script>

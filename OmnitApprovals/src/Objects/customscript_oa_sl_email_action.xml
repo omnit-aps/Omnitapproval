@@ -23,6 +23,7 @@
       <loglevel>DEBUG</loglevel>
       <allemployees>T</allemployees>
       <allroles>T</allroles>
+      <availablewithoutlogin>T</availablewithoutlogin>
     </scriptdeployment>
   </scriptdeployments>
 </suitelet>
