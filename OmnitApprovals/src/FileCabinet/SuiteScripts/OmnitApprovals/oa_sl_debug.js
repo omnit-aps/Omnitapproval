@@ -102,7 +102,7 @@ define(['N/config', 'N/runtime', 'N/search', 'N/log', 'N/https', 'N/record'], (c
         const linkRe = /https?:\/\/[^\s"'<>]+/g;
         const links = (body.match(linkRe) || []);
         const approveLinks = links.filter((l) => /action=approve|[?&]approve|=approve/i.test(l));
-        const rejectLinks = links.filter((l) => /action=reject|[?&]reject|=reject/i.test(l));
+        const rejectLinks = links.filter((l) => /action=(reject|decline)|[?&](reject|decline)|=(reject|decline)/i.test(l));
         out.push({
           id, subject, recipient, transaction,
           bodyLength: body.length,

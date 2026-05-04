@@ -64,6 +64,24 @@ define([
     log.audit('OA-UE-BEFORE execContext (no filter)', { execContext, recordId });
 
     if (context.type === TRIGGER.EDIT) {
+      // Engine-initiated state transitions (processApproval / processDecline /
+      // processReassign / processReset / processDelegation) call rec.save() to
+      // persist the new approvalstatus + next_approver. Without this guard,
+      // beforeSubmit re-runs routing and overwrites the engine's transition
+      // (REJECTED → re-route → reset to PENDING). Detect by checking whether
+      // approvalstatus changed in this save: only the engine touches that
+      // field; users can't edit it directly via the UI.
+      try {
+        const oldStatus = context.oldRecord ? context.oldRecord.getValue('approvalstatus') : null;
+        const newStatus = rec.getValue('approvalstatus');
+        if (oldStatus && newStatus && String(oldStatus) !== String(newStatus)) {
+          log.audit('OA-UE-BEFORE skip', { reason: 'approvalstatus transition (engine-initiated save)', recordId, oldStatus, newStatus });
+          return;
+        }
+      } catch (e) {
+        log.error('OA-UE-BEFORE: status-transition check failed', e.message);
+      }
+
       let hasOaHistory = false;
       try {
         search.create({

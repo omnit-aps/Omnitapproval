@@ -305,4 +305,214 @@ async function setEmployeeFlag(page, employeeId, fieldId, value) {
   return { changed: true, before, after };
 }
 
-module.exports = { createVendorBill, readField, deleteTestRecord, setEmployeeFlag, assertNotLoggedOut, TEST_TAG, memoTag };
+/**
+ * Creates a basic Purchase Order via the standard NetSuite UI.
+ * Mirrors {@link createVendorBill} but uses the PO 'item' sublist instead
+ * of the VB 'expense' sublist. Returns the saved record's internal id and
+ * approval status.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {object} opts
+ * @param {string} opts.vendor    Vendor display name
+ * @param {string} [opts.item]    Optional item name to prefer; falls through
+ *                                a list of common candidates if not found.
+ * @param {number} [opts.quantity] Line quantity (defaults to 1)
+ * @param {string} opts.scenario  Short label embedded in memo
+ */
+async function createPurchaseOrder(page, { vendor, item, quantity, scenario }) {
+  const qty = Number(quantity || 1);
+  await page.goto('/app/accounting/transactions/purchord.nl?whence=');
+  await page.waitForLoadState('domcontentloaded');
+  await dismissBlockingModals(page);
+
+  // Vendor selection — same type-ahead pattern as VB.
+  const entityInput = page.locator('#entity_display');
+  await entityInput.clear();
+  await entityInput.pressSequentially(vendor, { delay: 80 });
+  const suggestionList = page.locator('div.ns-suggest-list .ns-sug-item, div[id^="_suggestions"] li, div.suggestions li').first();
+  const listVisible = await suggestionList.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false);
+  if (listVisible) {
+    await suggestionList.click();
+  } else {
+    await page.keyboard.press('Tab');
+  }
+  await dismissBlockingModals(page);
+  await page.locator('#entity_displayonly').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
+  await assertNotLoggedOut(page);
+  // PO doesn't auto-fill an account field, so wait for the item sublist API to be ready.
+  await page.waitForFunction(() => {
+    /** @type {any} */ const w = window;
+    try { return typeof w.nlapiSelectNewLineItem === 'function' && Boolean(w.nlapiGetFieldValue && w.nlapiGetFieldValue('entity')); } catch (_) { return false; }
+  }, null, { timeout: 45_000 });
+  await page.locator('#popuptimeoutblocker').waitFor({ state: 'hidden' }).catch(() => {});
+
+  // Body memo.
+  await page.locator('input[aria-labelledby="memo_fs_lbl"]').fill(memoTag(scenario));
+
+  // Item resolution strategy:
+  //   1. nlapiSearchRecord on type=item filtering isinactive=F. Item supertype
+  //      covers serviceitem, noninventoryitem, otherchargeitem, etc.
+  //   2. Prefer requested name, then a fallback list of common test item names.
+  //   3. Otherwise pick the first non-inactive item the search returns
+  //      (preferring service / non-inventory types since they don't need stock).
+  //   4. If search yields nothing, fall back to a list of hard-coded NS standard
+  //      item ids; if those also fail, fail loudly with a clear message.
+
+  const HARDCODED_ITEM_IDS = ['1', '2', '3', '4', '5', '10', '20', '50', '100'];
+  const fallbackItemNames = [
+    'Generic Service', 'Test Item', 'Service', 'Consulting', 'Consulting Services',
+    'Professional Services', 'Labor', 'Misc Service', 'Miscellaneous',
+    'Office Supplies', 'Generic Item',
+  ];
+  const PREFERRED_TYPES = ['Service', 'NonInvtPart', 'OthCharge', 'InvtPart', 'Group'];
+
+  /** @type {{id:string, name:string, type?:string}|null} */
+  let resolvedItem = null;
+  let resolveLog = '';
+  for (let attempt = 0; attempt < 3 && !resolvedItem; attempt++) {
+    if (attempt > 0) await page.waitForTimeout(1500);
+    resolvedItem = await page.evaluate(({ requested, fallbacks, preferredTypes }) => {
+      /** @type {any} */ const w = window;
+      try {
+        if (typeof w.nlapiSearchRecord !== 'function') return null;
+        const filters = [new w.nlobjSearchFilter('isinactive', null, 'is', 'F')];
+        const cols = [
+          new w.nlobjSearchColumn('internalid'),
+          new w.nlobjSearchColumn('itemid'),
+          new w.nlobjSearchColumn('type'),
+        ];
+        const rs = w.nlapiSearchRecord('item', null, filters, cols);
+        if (!rs || rs.length === 0) return null;
+        const items = rs.map((/** @type {any} */ r) => ({
+          id: r.getValue('internalid'),
+          name: r.getValue('itemid') || '',
+          type: r.getValue('type') || '',
+        }));
+        const candidates = requested ? [requested, ...fallbacks.filter((n) => n !== requested)] : fallbacks;
+        for (const name of candidates) {
+          const lower = String(name).toLowerCase();
+          const match = items.find(
+            (it) => it.name.toLowerCase() === lower ||
+                    it.name.toLowerCase().includes(lower) ||
+                    lower.includes(it.name.toLowerCase()),
+          );
+          if (match) return match;
+        }
+        // No name match — pick first item of a preferred type, else first item overall.
+        for (const t of preferredTypes) {
+          const byType = items.find((it) => it.type === t);
+          if (byType) return byType;
+        }
+        return items[0] || null;
+      } catch (_) { return null; }
+    }, { requested: item || null, fallbacks: fallbackItemNames, preferredTypes: PREFERRED_TYPES });
+  }
+
+  if (!resolvedItem) {
+    // Last resort: try hard-coded ids by attempting to set them on a line.
+    for (const id of HARDCODED_ITEM_IDS) {
+      const ok = await page.evaluate((tryId) => {
+        /** @type {any} */ const w = window;
+        try {
+          w.nlapiSelectNewLineItem('item');
+          w.nlapiSetCurrentLineItemValue('item', 'item', tryId, false, false);
+          const set = w.nlapiGetCurrentLineItemValue('item', 'item');
+          w.nlapiCancelLineItem('item');
+          return set === tryId;
+        } catch (_) { return false; }
+      }, id).catch(() => false);
+      if (ok) {
+        resolvedItem = { id, name: `[hardcoded id=${id}]` };
+        resolveLog = 'nlapiSearchRecord failed; resolved via hardcoded id probe';
+        break;
+      }
+    }
+  }
+  if (!resolvedItem) {
+    throw new Error('no items in sandbox; create one and re-run');
+  }
+  console.log(`[createPurchaseOrder] item resolved: "${resolvedItem.name}" (id=${resolvedItem.id}, type=${resolvedItem.type || '?'}, requested="${item || ''}") ${resolveLog}`);
+
+  // Add the item line. PO item-sourcing fires async sublist field updates
+  // (rate, units, taxcode); fire fire-fields=true on the item set so NS
+  // sources defaults, then poll briefly for the rate/description to show up
+  // before committing. Trigger field-change handlers via the 4th/5th args.
+  const lineResult = await page.evaluate(async ({ itemId, itemName, qty }) => {
+    /** @type {any} */ const w = window;
+    /** @type {Record<string, any>} */ const log = { itemUsed: itemName, itemId, steps: [] };
+    const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      w.nlapiSelectNewLineItem('item');
+      log.steps.push('selectNewLine');
+      // 4th arg = fireSlavingSync (synchronously source dependent fields).
+      w.nlapiSetCurrentLineItemValue('item', 'item', itemId, true, true);
+      log.steps.push('setItem');
+      // Wait up to 5s for NS to source rate / description.
+      let sourced = false;
+      for (let i = 0; i < 20 && !sourced; i++) {
+        const desc = w.nlapiGetCurrentLineItemValue('item', 'description');
+        const rate = w.nlapiGetCurrentLineItemValue('item', 'rate');
+        if (desc || rate) { sourced = true; break; }
+        await sleep(250);
+      }
+      log.sourced = sourced;
+      w.nlapiSetCurrentLineItemValue('item', 'quantity', String(qty), true, true);
+      log.steps.push('setQty');
+      const rate = w.nlapiGetCurrentLineItemValue('item', 'rate');
+      if (!rate || Number(rate) === 0) {
+        w.nlapiSetCurrentLineItemValue('item', 'rate', '100', true, true);
+        log.steps.push('forceRate');
+      }
+      log.preCommit = {
+        item: w.nlapiGetCurrentLineItemValue('item', 'item'),
+        quantity: w.nlapiGetCurrentLineItemValue('item', 'quantity'),
+        rate: w.nlapiGetCurrentLineItemValue('item', 'rate'),
+        amount: w.nlapiGetCurrentLineItemValue('item', 'amount'),
+      };
+      w.nlapiCommitLineItem('item');
+      log.steps.push('commit');
+      log.lineCount = w.nlapiGetLineItemCount('item');
+    } catch (e) {
+      log.fatal = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
+    }
+    return log;
+  }, { itemId: resolvedItem.id, itemName: resolvedItem.name, qty });
+  console.log(`[createPurchaseOrder] line result: ${JSON.stringify(lineResult)}`);
+  if (!lineResult.lineCount || lineResult.lineCount < 1) {
+    throw new Error(`Could not add PO item line: ${JSON.stringify(lineResult)}`);
+  }
+
+  // Save.
+  await page.evaluate(() => /** @type {HTMLElement|null} */ (document.activeElement)?.blur());
+  await page.locator('#popuptimeoutblocker').waitFor({ state: 'hidden' }).catch(() => {});
+  await assertNotLoggedOut(page);
+  await page.locator('#btn_multibutton_submitter').click({ force: true });
+  try {
+    await page.waitForURL((u) => /purchord\.nl/.test(u.toString()) && /id=\d+/.test(u.toString()), { timeout: 60_000 });
+    await assertNotLoggedOut(page);
+  } catch (e) {
+    await assertNotLoggedOut(page).catch((logoutErr) => { throw logoutErr; });
+    await page.screenshot({ path: 'test-results/po-save-stuck.png', fullPage: true });
+    throw e;
+  }
+
+  const id = new URL(page.url()).searchParams.get('id');
+  await page.goto(`/app/accounting/transactions/purchord.nl?id=${id}&e=T`);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(() => {
+    /** @type {any} */ const w = window;
+    try {
+      return Boolean(
+        w.nlapiGetFieldValue &&
+        (w.nlapiGetFieldValue('approvalstatus') || w.nlapiGetFieldValue('orderstatus')),
+      );
+    } catch (_) { return false; }
+  }, null, { timeout: 30_000 });
+  // POs surface approval state via 'approvalstatus' (same field as VB on most accounts);
+  // some forms expose it as 'orderstatus' instead — read both and prefer the non-empty.
+  const status = (await readField(page, 'approvalstatus')) || (await readField(page, 'orderstatus'));
+  const nextApprover = await readField(page, 'nextapprover');
+  return { id, status, nextApprover, itemUsed: lineResult.itemUsed, itemId: lineResult.itemId };
+}
+
+module.exports = { createVendorBill, createPurchaseOrder, readField, deleteTestRecord, setEmployeeFlag, assertNotLoggedOut, TEST_TAG, memoTag };
