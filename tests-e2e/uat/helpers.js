@@ -349,6 +349,48 @@ async function createPurchaseOrder(page, { vendor, item, quantity, scenario }) {
   // Body memo.
   await page.locator('input[aria-labelledby="memo_fs_lbl"]').fill(memoTag(scenario));
 
+  // LOCATION (required on PO in Manufacturing-edition NS accounts). NS
+  // scopes Location by Subsidiary — picking a Location outside the active
+  // Subsidiary silently rejects. Iterate the existing <select id="location">
+  // options (which NS already filtered to valid subsidiary-scoped values)
+  // and pick the first non-empty one. Falls back to nlapiSetFieldValue with
+  // a searched id when the DOM picker isn't available.
+  const resolvedLocation = await page.evaluate(() => {
+    /** @type {any} */ const w = window;
+    try {
+      const existing = w.nlapiGetFieldValue && w.nlapiGetFieldValue('location');
+      if (existing) return { id: existing, source: 'preset' };
+      // Try the rendered <select> first — it shows only subsidiary-scoped locations
+      const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('location'));
+      if (sel && sel.options) {
+        for (let i = 0; i < sel.options.length; i++) {
+          const opt = sel.options[i];
+          if (opt.value && opt.value !== '0' && opt.value !== '') {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            try { w.nlapiSetFieldValue('location', opt.value, true, true); } catch (_) {}
+            return { id: opt.value, name: opt.text, source: 'dom-select' };
+          }
+        }
+      }
+      // Fallback: search filtered by current subsidiary so we don't pick a
+      // cross-subsidiary location that NS will silently reject.
+      const subId = w.nlapiGetFieldValue && w.nlapiGetFieldValue('subsidiary');
+      const filters = [new w.nlobjSearchFilter('isinactive', null, 'is', 'F')];
+      if (subId) filters.push(new w.nlobjSearchFilter('subsidiary', null, 'anyof', subId));
+      const rs = w.nlapiSearchRecord('location', null, filters,
+        [new w.nlobjSearchColumn('internalid'), new w.nlobjSearchColumn('name')]);
+      if (rs && rs.length) {
+        const first = rs[0];
+        const id = first.getValue('internalid');
+        try { w.nlapiSetFieldValue('location', id, true, true); } catch (_) {}
+        return { id, name: first.getValue('name'), source: 'searched-by-sub' };
+      }
+    } catch (e) { return { __error: e.message || String(e) }; }
+    return null;
+  });
+  console.log(`[createPurchaseOrder] location: ${JSON.stringify(resolvedLocation)}`);
+
   // Item resolution strategy:
   //   1. nlapiSearchRecord on type=item filtering isinactive=F. Item supertype
   //      covers serviceitem, noninventoryitem, otherchargeitem, etc.
@@ -488,7 +530,9 @@ async function createPurchaseOrder(page, { vendor, item, quantity, scenario }) {
   await assertNotLoggedOut(page);
   await page.locator('#btn_multibutton_submitter').click({ force: true });
   try {
-    await page.waitForURL((u) => /purchord\.nl/.test(u.toString()) && /id=\d+/.test(u.toString()), { timeout: 60_000 });
+    // NS lands at either purchord.nl?id=N (older form variants) OR
+    // transaction.nl?id=N (newer / Manufacturing-edition forms). Accept both.
+    await page.waitForURL((u) => /(?:purchord|transaction)\.nl/.test(u.toString()) && /id=\d+/.test(u.toString()), { timeout: 60_000 });
     await assertNotLoggedOut(page);
   } catch (e) {
     await assertNotLoggedOut(page).catch((logoutErr) => { throw logoutErr; });
