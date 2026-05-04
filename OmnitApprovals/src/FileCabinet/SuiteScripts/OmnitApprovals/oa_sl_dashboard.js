@@ -7,10 +7,11 @@ define([
   'N/runtime',
   'N/search',
   'N/url',
+  'N/format',
   './lib/oa_constants',
   './lib/oa_utils',
   './oa_engine'
-], (runtime, search, url, C, utils, engine) => {
+], (runtime, search, url, format, C, utils, engine) => {
   'use strict';
 
   function onRequest(context) {
@@ -194,12 +195,26 @@ define([
     }
 
     // ── Additional advanced filters ──────────────────────────────────────────────
-    if (dateFrom && dateTo) {
-      filters.push('AND', ['trandate', 'within', dateFrom, dateTo]);
-    } else if (dateFrom) {
-      filters.push('AND', ['trandate', 'onorafter', dateFrom]);
-    } else if (dateTo) {
-      filters.push('AND', ['trandate', 'onorbefore', dateTo]);
+    // Codex MED #4: HTML date inputs submit ISO 'YYYY-MM-DD'. NS transaction
+    // searches expect the account's date format (M/D/YYYY in US accounts).
+    // Convert via N/format so the filter doesn't silently match nothing in
+    // accounts using a different display format.
+    const _toAccountDate = (iso) => {
+      try {
+        if (!iso) return iso;
+        const d = new Date(iso + 'T00:00:00');
+        if (isNaN(d.getTime())) return iso;
+        return format.format({ value: d, type: format.Type.DATE });
+      } catch (_) { return iso; }
+    };
+    const dateFromFmt = _toAccountDate(dateFrom);
+    const dateToFmt   = _toAccountDate(dateTo);
+    if (dateFromFmt && dateToFmt) {
+      filters.push('AND', ['trandate', 'within', dateFromFmt, dateToFmt]);
+    } else if (dateFromFmt) {
+      filters.push('AND', ['trandate', 'onorafter', dateFromFmt]);
+    } else if (dateToFmt) {
+      filters.push('AND', ['trandate', 'onorbefore', dateToFmt]);
     }
 
     if (vendorId) {
@@ -222,7 +237,11 @@ define([
     }
 
     const rows = [];
-    search.create({
+    // Codex MED #5: search.run().each() silently caps at 4000 rows. For
+    // accounts with deep history (e.g. all-status filter on a busy
+    // sub) totals + pagination would lie above 4k. runPaged with
+    // pageSize=1000 paginates the result and yields every row, no cap.
+    const pagedSearch = search.create({
       type:    'transaction',
       filters,
       columns: [
@@ -232,7 +251,9 @@ define([
         C.FIELDS.TRANSACTION.BASE_AMOUNT,
         { name: 'datecreated', sort: search.Sort.DESC }
       ]
-    }).run().each(r => {
+    });
+    const pagedData = pagedSearch.runPaged({ pageSize: 1000 });
+    const _processRow = (r) => {
       const approvalStatus = r.getValue('approvalstatus');
       const txnAmount  = parseFloat(r.getValue('amount')) || 0;
       const baseAmount = parseFloat(r.getValue(C.FIELDS.TRANSACTION.BASE_AMOUNT)) || 0;
@@ -256,7 +277,10 @@ define([
         submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY) || '—',
         created:      r.getValue('datecreated')
       });
-      return true;
+    };
+    pagedData.pageRanges.forEach((pageRange) => {
+      const pg = pagedData.fetch({ index: pageRange.index });
+      pg.data.forEach(_processRow);
     });
 
     return rows;
@@ -678,10 +702,14 @@ define([
 <div class="toast" id="toast"></div>
 
 <script>
-const SELF_URL       = '${selfUrl}';
-const OA_QUICK_ID     = '${_esc(quickId)}';
-const OA_QUICK_ACTION = '${_esc(quickAction)}';
-const OA_QUICK_TYPE   = '${_esc(quickType)}';
+// Codex MED #8: emit values with JSON.stringify (JS-safe escape) instead of
+// _esc (HTML-safe). HTML escape doesn't protect a JS string literal — an
+// apostrophe or backslash in the value would break the script. JSON.stringify
+// produces a properly-quoted JS literal regardless of the input.
+const SELF_URL       = ${JSON.stringify(selfUrl)};
+const OA_QUICK_ID     = ${JSON.stringify(String(quickId || ''))};
+const OA_QUICK_ACTION = ${JSON.stringify(String(quickAction || ''))};
+const OA_QUICK_TYPE   = ${JSON.stringify(String(quickType || ''))};
 
 // ─── Quick-action pre-fill (from portlet "quick approve" links) ───────────────
 window.addEventListener('DOMContentLoaded', () => {
