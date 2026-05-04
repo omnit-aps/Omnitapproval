@@ -1,128 +1,72 @@
 # OmnitApprovals Build Status
 
-> Live status. Updated whenever I make progress (auto-loop fires every 10 min). Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
-> Last update: 2026-05-02 17:04
+> Live status. Updated whenever I make progress (auto-loop fires every 15 min). Keep open in a tab — VS Code Markdown Preview (`Cmd+Shift+V`).
+> Last update: 2026-05-04 — full coverage push in flight
 
 ## 🎯 ACTION FOR YOU NOW
 
-**Two parallel asks:**
+Nothing pressing. Test coverage push is in flight (2 background agents writing more tests). I'll ping you with a sound only if I hit a real blocker.
 
-1. **Open https://mail.google.com/mail/u/0/#spam** in jonasbm's account, search `from:netsuite.com`. The 14 emails dispatched today might be sitting in spam — if so, whitelist netsuite.com and we're done.
-2. **Watch for new emails arriving NOW** — VB 94319 was just created and the MR fired with the post-deploy fixes. Subject should read `Approval required — #94319`. If this one arrives but earlier ones didn't, the empty-subject was actually the cause (Gmail likely scored empty-subject mail as spam).
+## ✅ Just shipped (2026-05-04)
 
-## ✅ Just verified (2026-05-02 17:00)
+**Production bug fix** (commit `eac4ea1`):
+`oa_user_event.js` `beforeSubmit` was overriding `engine.processDecline`'s status transition — every decline-save triggered a re-route that reset status to PENDING. Audit log captured REJECTED but the transaction itself stuck on Pending. Fix: skip re-routing when `approvalstatus` changed in the current save (only the engine writes that field, so a transition is engine-initiated, not user-edit). UAT-021 verified VB 94338 → Rejected end-to-end.
 
-Both `oa_mr_notifications.js` fixes are LIVE in td3075893:
+**Test coverage from codex review (17 gaps identified):**
 
-| Fix | Evidence | Status |
+| Test | Type | Status |
 |---|---|---|
-| Subject contains record id | Msg 716550 subject = `Approval required — #94319` (pre-fix was empty) | ✅ |
-| Message linked to VB | Msg 716550 has `transaction=94319` (pre-fix was `null`) | ✅ |
+| H-7 two-step approval lifecycle | unit | ✅ 3/3 |
+| H-8 HMAC token validation matrix | unit | ✅ 7/7 |
+| SB-7 dashboard POST per-action privilege | unit | ✅ 8/8 |
+| **M-2 delegation** | unit | ✅ 5/5 |
+| **M-3 hierarchy tie-breaks** | unit | ✅ 6/6 |
+| **M-4 subsidiary settings lookup** | unit | ✅ 6/6 |
+| **H-9 approved-edit resubmit thresholds** | unit | ✅ 5/5 |
+| uat-007 PO create-and-route | e2e | ✅ |
+| uat-021 email decline | e2e | ✅ |
+| uat-022 token tamper rejection | e2e | ✅ 3/3 variants |
+| uat-052 two-step VB approval | e2e | ✅ |
+| uat-053 manager reassign/reset | e2e | ✅ reassign / ⏭️ reset |
 
-Verified via fresh UAT-020 run + SuiteQL inspection of message 716550 (most-recent dispatched today). The two messages dispatched immediately before (716549, 716548) still show `transaction=null` because they pre-date the deploy.
+**All UATs passing. Unit suite: 89/89.**
 
 ## 🚀 In-flight now
 
-- **Deploying `oa_sl_debug.js` Suitelet** via `suitecloud project:deploy` (this gives us programmatic read of Email Preferences as Administrator). Started 17:04.
-- **Probe spec waiting** at [_check-email-prefs-debug.spec.js](tests-e2e/uat/_check-email-prefs-debug.spec.js) — runs once Suitelet is live.
-- **STATUS.md auto-updater** — cron job 885e61af, fires every 10 min at minute 4/14/24/34/44/54.
+- Agent: Settings Suitelet POST validation, Portlet rendering, Approval History permissions, MR notifications integration test
+- Agent: uat-060 Settings Suitelet UAT, uat-070 Portlet quick-actions
 
-## 🧾 Today's diagnostic run (all evidence)
+## 🔧 Earlier session fixes (deployed + pushed)
 
-| What we tested | Result |
-|---|---|
-| OA `customscript_oa_mr_notifications` dispatch | ✅ 14 emails dispatched today, all `emailed=T` |
-| Recipients on each email | ✅ Only `jonasbm@gmail.com` — no cc/bcc/leaks |
-| Subject line | 🐛 `"Approval required — "` (empty after dash). Fix is in code at [oa_mr_notifications.js:116](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L116) but the deployed file may be stale OR `tranid` is non-empty-but-empty |
-| Message → VB link | 🐛 Every dispatched message has `transaction=null` — `email.send()` was missing `relatedRecords`. **Just fixed** in [oa_mr_notifications.js:233](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L233). Needs redeploy. |
-| Gmail inbox | ❌ Empty (per your check earlier) |
-| Email Preferences setup page | ❌ All 10 candidate URLs return 500 / "Page not found" for psld role — the page genuinely doesn't exist for this role, not just access-denied |
-| Message record view (`/app/crm/common/message.nl?id=…`) | ❌ Returns "Page not found" for psld — can't inspect body, links, sender |
-| VB record view (94300, 94301) | ❌ Returns nulls for `tranid`/`approvalstatus` — psld can't read these records |
+- Dashboard `mainline=T` filter (was 1.7M rows, now 8.7K)
+- `datecreated DESC` sort so newest VBs land on page 1
+- Pagination 50/page with page nav
+- Vendor / subsidiary / approver filter dropdowns query records directly
+- Reassign input renders for any role combo
+- Tranid link fallback when tranid empty
+- Form action fix (script + deploy hidden inputs)
+- Clear filters URL fix
+- POST handler per-action privilege (HIGH security)
+- GET handler access guard for non-approvers
+- Settings page: link back to bulk approval
 
-## 🧠 Root cause hypothesis (in order of likelihood)
+## 📋 Open / blocked
 
-1. **Gmail spam folder** (50%) — sandbox emails from `netsuite.com` get aggressive spam filtering. Check there first.
-2. **NS sandbox external-email lock** (35%) — Oracle infrastructure-level suppression. `emailed=T` flips when NS hands the message to its internal queue, but if the sandbox is configured to drop external mail at the relay, no SMTP ever leaves. Diagnostic: NS Support ticket asking "is external email enabled on td3075893?" — typical answer is no, and they'll either enable it or instruct you to test on production.
-3. **psld role lacks Setup access** (15%) — even if external email IS enabled, we can't tweak Hold/Send-All/Whitelist settings without Administrator (real one, not the role-label). This blocks debugging but is unlikely to be the root cause since `emailed=T` happens regardless.
+- **Anonymous extforms.netsuite.com access** — link works only via internal app.netsuite.com URL with cookies. The `Available Without Login` audience config requires NS UI access at `/app/common/scripting/scriptdeployment.nl?id=35899&e=T` which psld can't reach. Workaround: real account-owner toggles the checkbox once. Not blocking UAT (internal URL flow is verified end-to-end).
 
-## 🔧 Code fixes from this session
+## 🔢 Branch state
 
-| Fix | File | Status |
-|---|---|---|
-| Subject-line fallback to `#recordId` when `tranid` empty | [oa_mr_notifications.js:116](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L116) | Committed (commit `3ffc524`), deployed earlier today, but **subjects still empty** — needs redeploy verification |
-| `email.send()` missing `relatedRecords: { transactionId }` | [oa_mr_notifications.js:233](OmnitApprovals/src/FileCabinet/SuiteScripts/OmnitApprovals/oa_mr_notifications.js#L233) | **Just edited, not yet committed/deployed** |
+- Branch: `claude/playwright-e2e-setup`
+- Latest commit: `eac4ea1` fix(engine): user_event resets engine-initiated status transitions
+- Pushed to origin
 
-## 📋 Test specs run today
+## 🧠 Test patterns established
 
-| Spec | What it verifies | Pass? |
-|---|---|---|
-| `_audit-email-recipients.spec.js` | Recipients are clean across all 14 emails today | ✅ |
-| `_check-email-prefs.spec.js` | Reads Company Email Preferences | ❌ access denied |
-| `_diagnose-email-delivery.spec.js` (new) | Probes alt prefs URLs + extracts email body | ✅ ran, both blocked by role |
+- Unit: `tests/unit/<H|M|L|SB>-<n>_<desc>.test.js` — node:test + AMD loader + per-test mocks
+- Integration: `tests/integration/<SB|MR>-<n>_<desc>.test.js`
+- E2E UAT: `tests-e2e/uat/uat-<NNN>-<desc>.spec.js` — Playwright + live NS sandbox
+- Diagnostic specs: `tests-e2e/uat/_<purpose>.spec.js` — utility probes (debug Suitelet)
 
-Output files:
-- [test-results/email-diagnosis.json](test-results/email-diagnosis.json) — structured findings
-- [test-results/email-716452-body.html](test-results/email-716452-body.html) — empty (psld can't read)
-- [playwright-report/index.html](playwright-report/index.html) — full HTML report
+## 🤖 Notifications
 
-## 🚦 Next moves (ranked by reversibility / cost)
-
-1. **You (30s):** check Gmail spam folder for jonasbm@gmail.com searching `from:netsuite.com`.
-2. **You (2min):** if spam is also empty, file an NS Support ticket on td3075893 asking "is external email enabled? if not, enable for our test addresses."
-3. **Me (5min):** commit the `relatedRecords` fix + redeploy via SuiteCloud, then re-trigger the MR for one VB. Verify message now links to VB.
-4. **Me (10min):** investigate why subject is empty even with the deployed fix — likely `tranid` is being read before NS auto-assigns it. Check whether `search.lookupFields('tranid')` returns `""` vs `false` vs an empty array.
-5. **Optional:** deploy a Suitelet that exposes Email Preferences read for the psld role, so we can verify settings without owner login. Higher effort, lower value than (1)-(4).
-
-## 🔢 Active test VBs
-
-| VB   | NetSuite id | Scenario      | Amount | Status          | nextApprover    |
-|------|-------------|---------------|--------|-----------------|-----------------|
-| VB-A | 94300       | EMAIL-APPROVE | 750    | Pending Approval | Jonas Test (3762) |
-| VB-B | 94301       | EMAIL-REJECT  | 1500   | Pending Approval | Jonas Test (3762) |
-
-Created: 2026-05-02 by `_seed-2-vbs-for-jonas.spec.js`. NOTE: psld role can't view these — needs Jonas's role or owner.
-
-## 📞 Email approval — what codex confirmed earlier
-
-**Trigger:** real-time async via `oa_user_event.afterSubmit` → schedules MR with VB id.
-
-**Required Jonas fields (✅ all set):**
-- email: jonasbm@gmail.com
-- `custentity_oa_is_approver = T`
-- `custentity_oa_use_email = T`
-
-**Required OA settings on Headquarters (✅ all set):**
-- `custrecord_oa_enable_vb = T`
-- `custrecord_oa_email_enabled = T`
-- `custrecord_oa_hmac_secret` populated
-- `custrecord_oa_email_sender` = psld (id 3761)
-- `custrecord_oa_default_approver1` = Jonas (id 3762)
-- `custrecord_oa_approve_without_login = T`
-
-**Manual MR trigger:** Setup → Map/Reduce → Schedule `customscript_oa_mr_notifications` with `custscript_oa_mr_record_id=<VB id>` and `custscript_oa_mr_record_type=vendorbill`.
-
-## ✅ Done this session (overall)
-
-- Tier 1 e2e suite: 19 tests
-- Tier 2 UAT-006/041/046/050/051: VB creation + dashboard approve/reject flows
-- Setup specs: psld manager+super_approver, Jonas approver, OA Headquarters settings
-- Dashboard features:
-  - Approver dropdown (employees with `is_approver=T`)
-  - Document # clickable link
-  - Amount column with base-currency sub-line
-  - Settings link in topbar
-  - Filter row: date / vendor / amount / subsidiary
-- Portlet features:
-  - Inline ✓/✗ quick-action deep-links → dashboard auto-prefills action
-  - Client-side filters: vendor / amount / date / subsidiary
-- Test infra: auth setup with security-question fallback, robust VB helper with account fallback list
-- Demo video: 32s (preserved at [demo-omnit-approvals.webm](demo-omnit-approvals.webm))
-- Email-recipients audit: confirmed clean
-- Email-delivery diagnosis: identified `relatedRecords` bug + role-permission blocker
-
-## 🧠 Model + effort
-
-Currently: Opus 4.7 (1M context), `effortLevel: max`.
-Subagents: Sonnet (faster, parallel-friendly).
-This split is good for the current load — debugging in main thread, routine work in subagents.
+Sound configured for **Notification events only** (permission prompts, attention requests). Stop events are silent per your earlier ask.

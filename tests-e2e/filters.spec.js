@@ -1,8 +1,10 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
 
-const DASHBOARD_PATH = process.env.NS_DASHBOARD_PATH;
-test.skip(!DASHBOARD_PATH, 'Set NS_DASHBOARD_PATH to enable');
+// Resolve dashboard URL via the live NS session — no env var needed.
+// Falls back to NS_DASHBOARD_PATH if explicitly set.
+const DASHBOARD_PATH = process.env.NS_DASHBOARD_PATH ||
+  '/app/site/hosting/scriptlet.nl?script=customscript_oa_sl_dashboard&deploy=customdeploy_oa_sl_dashboard';
 
 test.describe('dashboard filters', () => {
   test('Pending is the default active status filter', async ({ page }) => {
