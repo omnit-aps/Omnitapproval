@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suitelet scriptid="customscript_oa_sl_analytics">
+  <name>OA - Analytics Dashboard</name>
+  <scriptfile>[/SuiteScripts/OmnitApprovals/oa_sl_analytics.js]</scriptfile>
+  <isinactive>F</isinactive>
+  <notifyadmins>F</notifyadmins>
+  <notifyowner>T</notifyowner>
+  <scriptdeployments>
+    <scriptdeployment scriptid="customdeploy_oa_sl_analytics">
+      <title>OA - Analytics</title>
+      <status>RELEASED</status>
+      <isdeployed>T</isdeployed>
+      <loglevel>DEBUG</loglevel>
+      <allemployees>T</allemployees>
+      <allroles>T</allroles>
+    </scriptdeployment>
+  </scriptdeployments>
+</suitelet>
