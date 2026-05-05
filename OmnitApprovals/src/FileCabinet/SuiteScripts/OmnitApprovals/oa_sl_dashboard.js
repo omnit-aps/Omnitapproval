@@ -179,10 +179,24 @@ define([
     const typeMap  = { po: 'PurchOrd', vb: 'VendBill' };
     const txnTypes = typeFilter === 'all' ? ['PurchOrd', 'VendBill'] : [typeMap[typeFilter]].filter(Boolean);
 
+    // PO records often save with approvalstatus = null (NS native PO workflow
+    // governs the field on POs even when OA's user_event sets it via setValue).
+    // Treat the routing signal as: status filter matches OR (custom-routed AND
+    // status filter is the default 'pending'). This lets POs appear in the
+    // pending view without breaking the explicit Approved/Rejected filters.
+    const includePendingPoFallback = statusFilter === 'pending' || statusFilter === 'all';
+    const statusClause = includePendingPoFallback
+      ? [
+          ['approvalstatus', 'anyof', approvalStatuses],
+          'OR',
+          [['approvalstatus', 'isempty', null], 'AND', ['custbody_oa_next_approver', 'noneof', ['@NONE@']]]
+        ]
+      : [['approvalstatus', 'anyof', approvalStatuses]];
+
     const filters = [
       ['type', 'anyof', txnTypes],
       'AND',
-      ['approvalstatus', 'anyof', approvalStatuses],
+      statusClause,
       'AND',
       ['mainline', 'is', 'T'],
       'AND',
@@ -267,11 +281,24 @@ define([
         subsidiary:  r.getText('subsidiary'),
         amount:      txnAmount,
         baseAmount:  baseAmount,
-        status:      approvalStatus,
-        statusLabel: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'Pending'
-                   : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved' : 'Rejected',
-        statusClass: approvalStatus === C.APPROVAL_STATUS.PENDING  ? 'badge-orange'
-                   : approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green' : 'badge-red',
+        // Normalize approvalstatus across PO and VB. NS PO transactions sometimes
+        // expose approvalstatus as '' or '0' instead of '1' even when OA's
+        // user_event wrote '1' before save (NS native PO workflow re-reads it).
+        // Rule: if next_approver is set AND status is not explicitly Approved/Rejected,
+        // treat as Pending. Approved/Rejected stay as-is.
+        status: (function (a, hasApprover) {
+          if (a === C.APPROVAL_STATUS.APPROVED) return C.APPROVAL_STATUS.APPROVED;
+          if (a === C.APPROVAL_STATUS.REJECTED) return C.APPROVAL_STATUS.REJECTED;
+          if (hasApprover) return C.APPROVAL_STATUS.PENDING;
+          return a || '';
+        })(approvalStatus, !!r.getValue('custbody_oa_next_approver')),
+        statusLabel: approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'Approved'
+                   : approvalStatus === C.APPROVAL_STATUS.REJECTED ? 'Rejected'
+                   : r.getValue('custbody_oa_next_approver')       ? 'Pending'
+                   : '—',
+        statusClass: approvalStatus === C.APPROVAL_STATUS.APPROVED ? 'badge-green'
+                   : approvalStatus === C.APPROVAL_STATUS.REJECTED ? 'badge-red'
+                   : 'badge-orange',
         nextApprover:   r.getText('custbody_oa_next_approver') || '—',
         nextApproverId: r.getValue('custbody_oa_next_approver') || '',
         submittedBy:  r.getText(C.FIELDS.TRANSACTION.SUBMITTED_BY) || '—',

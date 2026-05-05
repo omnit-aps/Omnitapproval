@@ -11,3 +11,14 @@ node_modules/
 
 # Recorded demo videos (preserved separately, not committed)
 *.webm
+
+# Demo screenshots (large binary, regenerable on demand)
+/demo-screenshots/
+/demo-screenshots-ns/
+
+# Local Oracle agent-skills installation (per-machine, large)
+/.agents/
+/skills-lock.json
+
+# SuiteCloud per-project auth pointer (machine-local)
+/OmnitApprovals/project.json
