@@ -83,6 +83,46 @@ define([
     return days;
   }
 
+  /**
+   * UAT-065: aging buckets for currently-pending transactions.
+   * Buckets: 0-3 days, 4-7 days, 8-14 days, 15-30 days, 30+ days.
+   * Returns counts and the oldest pending transaction's age in days.
+   */
+  function loadPendingAging() {
+    const buckets = { '0-3': 0, '4-7': 0, '8-14': 0, '15-30': 0, '30+': 0 };
+    let oldest = 0;
+    let totalPending = 0;
+    const NOW = Date.now();
+    try {
+      search.create({
+        type: 'transaction',
+        filters: [
+          ['type', 'anyof', ['PurchOrd', 'VendBill']],
+          'AND', ['mainline', 'is', 'T'],
+          'AND', ['approvalstatus', 'anyof', [C.APPROVAL_STATUS.PENDING]],
+        ],
+        columns: ['internalid', 'datecreated', 'approvalstatus', 'custbody_oa_next_approver']
+      }).run().each((r) => {
+        const status = r.getValue('approvalstatus');
+        if (status === C.APPROVAL_STATUS.APPROVED || status === C.APPROVAL_STATUS.REJECTED) return true;
+        const dc = r.getValue('datecreated') || '';
+        const m = dc.match(/(\d+)\/(\d+)\/(\d+)/);
+        if (!m) return true;
+        const ts = new Date(`${m[3]}-${String(m[1]).padStart(2,'0')}-${String(m[2]).padStart(2,'0')}T00:00:00`).getTime();
+        const days = Math.floor((NOW - ts) / 86400000);
+        totalPending++;
+        if (days > oldest) oldest = days;
+        if      (days <= 3)  buckets['0-3']++;
+        else if (days <= 7)  buckets['4-7']++;
+        else if (days <= 14) buckets['8-14']++;
+        else if (days <= 30) buckets['15-30']++;
+        else                 buckets['30+']++;
+        return true;
+      });
+    } catch (e) { /* graceful */ }
+    return { buckets, oldest, totalPending };
+  }
+
   function loadTopVendors() {
     const totals = {};
     let count = 0;
@@ -113,9 +153,10 @@ define([
     const resp = context.response;
     resp.setHeader({ name: 'Content-Type', value: 'text/html; charset=utf-8' });
 
-    const status = loadStatusCounts();
-    const daily  = loadDailyVolume();
+    const status  = loadStatusCounts();
+    const daily   = loadDailyVolume();
     const vendors = loadTopVendors();
+    const aging   = loadPendingAging();
 
     const dailyKeys = Object.keys(daily);
     const dailyVals = Object.values(daily);
@@ -138,16 +179,18 @@ define([
   .card.full{grid-column:1/-1}
   .card h2{font-size:15px;font-weight:700;color:#312d2a;margin-bottom:4px}
   .card .h2-sub{font-size:12px;color:#888;margin-bottom:18px}
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
   .kpi{background:#fff;border-radius:12px;padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.06);position:relative;overflow:hidden}
   .kpi-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.7px;font-weight:600}
   .kpi-value{font-size:32px;font-weight:700;margin-top:6px;line-height:1.1}
   .kpi-pending  {border-left:5px solid #f59f0b}
   .kpi-approved {border-left:5px solid #2e7d32}
   .kpi-rejected {border-left:5px solid #c74634}
+  .kpi-aging    {border-left:5px solid #6a1b9a}
   .kpi-pending .kpi-value{color:#f59f0b}
   .kpi-approved .kpi-value{color:#2e7d32}
   .kpi-rejected .kpi-value{color:#c74634}
+  .kpi-aging .kpi-value{color:#6a1b9a}
   .chart-box{position:relative;height:300px}
   .chart-box.tall{height:380px}
 </style>
@@ -174,6 +217,10 @@ define([
     <div class="kpi-label">Rejected (this month)</div>
     <div class="kpi-value">${status.rejected}</div>
   </div>
+  <div class="kpi kpi-aging">
+    <div class="kpi-label">Oldest pending (days)</div>
+    <div class="kpi-value">${aging.oldest}</div>
+  </div>
 </div>
 
 <div class="grid">
@@ -186,6 +233,11 @@ define([
     <h2>Daily routing volume</h2>
     <div class="h2-sub">Transactions submitted to OA per day, last 30 days</div>
     <div class="chart-box"><canvas id="chart-bar"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Pending approvals — aging</h2>
+    <div class="h2-sub">UAT-065: how long routed transactions have been waiting</div>
+    <div class="chart-box"><canvas id="chart-aging"></canvas></div>
   </div>
   <div class="card full">
     <h2>Top 10 vendors — approved spend (last 90d)</h2>
@@ -234,6 +286,33 @@ new Chart(document.getElementById('chart-bar'), {
     plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+      y: { beginAtZero: true, ticks: { stepSize: 1 } }
+    }
+  }
+});
+
+new Chart(document.getElementById('chart-aging'), {
+  type: 'bar',
+  data: {
+    labels: ['0–3 d','4–7 d','8–14 d','15–30 d','30+ d'],
+    datasets: [{
+      label: 'Pending count',
+      data: [
+        ${aging.buckets['0-3']},
+        ${aging.buckets['4-7']},
+        ${aging.buckets['8-14']},
+        ${aging.buckets['15-30']},
+        ${aging.buckets['30+']}
+      ],
+      backgroundColor: ['#2e7d32','#7cb342','#f59f0b','#fb8c00','#c74634'],
+      borderRadius: 6,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { size: 12 } } },
       y: { beginAtZero: true, ticks: { stepSize: 1 } }
     }
   }
