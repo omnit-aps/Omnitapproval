@@ -123,6 +123,51 @@ define([
     return { buckets, oldest, totalPending };
   }
 
+  /**
+   * UAT-067: detect pending transactions whose currently-assigned approver
+   * is INACTIVE. These are stuck-routing — the inactive employee will never
+   * approve (and may not be able to log in). Lists for manager triage.
+   */
+  function loadStaleRouting() {
+    const stuck = [];
+    try {
+      // Step 1: find inactive approver employee ids (cached set).
+      const inactiveApprovers = {};
+      search.create({
+        type: 'employee',
+        filters: [['isinactive', 'is', 'T']],
+        columns: ['internalid']
+      }).run().each((r) => { inactiveApprovers[r.id] = true; return true; });
+
+      // Step 2: walk pending transactions and flag any whose next_approver
+      // is in that inactive set.
+      search.create({
+        type: 'transaction',
+        filters: [
+          ['type', 'anyof', ['PurchOrd', 'VendBill']],
+          'AND', ['mainline', 'is', 'T'],
+          'AND', ['custbody_oa_next_approver', 'noneof', ['@NONE@']],
+        ],
+        columns: ['internalid', 'tranid', 'type', 'entity', 'custbody_oa_next_approver', 'datecreated']
+      }).run().each((r) => {
+        const approver = r.getValue('custbody_oa_next_approver');
+        if (approver && inactiveApprovers[approver]) {
+          stuck.push({
+            id:           r.id,
+            tranid:       r.getValue('tranid') || ('#' + r.id),
+            type:         r.getValue('type'),
+            entity:       r.getText('entity') || '—',
+            approverName: r.getText('custbody_oa_next_approver') || ('id ' + approver),
+            approverId:   approver,
+            datecreated:  r.getValue('datecreated')
+          });
+        }
+        return stuck.length < 50;
+      });
+    } catch (_) { /* graceful */ }
+    return stuck;
+  }
+
   function loadTopVendors() {
     const totals = {};
     let count = 0;
@@ -157,6 +202,7 @@ define([
     const daily   = loadDailyVolume();
     const vendors = loadTopVendors();
     const aging   = loadPendingAging();
+    const stale   = loadStaleRouting();
 
     const dailyKeys = Object.keys(daily);
     const dailyVals = Object.values(daily);
@@ -193,6 +239,14 @@ define([
   .kpi-aging .kpi-value{color:#6a1b9a}
   .chart-box{position:relative;height:300px}
   .chart-box.tall{height:380px}
+  .alert{background:#fff3e0;border-left:5px solid #f59f0b;border-radius:10px;padding:14px 18px;margin-bottom:18px}
+  .alert.danger{background:#ffebee;border-left-color:#c74634}
+  .alert h3{font-size:14px;font-weight:700;color:#312d2a;margin-bottom:6px}
+  .alert .alert-sub{font-size:12px;color:#666;margin-bottom:10px}
+  .alert table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border-radius:6px;overflow:hidden}
+  .alert th{padding:6px 10px;text-align:left;color:#888;font-size:10px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;background:#fafafa;border-bottom:1px solid #f0efee}
+  .alert td{padding:6px 10px;border-bottom:1px solid #f0efee}
+  .alert a{color:#1565c0;text-decoration:none}.alert a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -222,6 +276,24 @@ define([
     <div class="kpi-value">${aging.oldest}</div>
   </div>
 </div>
+
+${stale.length ? `<div class="alert ${stale.length >= 5 ? 'danger' : ''}">
+  <h3>⚠️ Stale routing — ${stale.length} pending transaction${stale.length === 1 ? '' : 's'} assigned to inactive approver${stale.length === 1 ? '' : 's'} <span style="color:#888;font-weight:400;font-size:12px">(UAT-067)</span></h3>
+  <div class="alert-sub">These transactions cannot move forward without manager intervention. Manager → Bulk Approval → Reassign.</div>
+  <table>
+    <thead><tr><th>Type</th><th>Doc #</th><th>Vendor</th><th>Inactive Approver</th><th>Created</th></tr></thead>
+    <tbody>
+      ${stale.slice(0, 10).map(s => `<tr>
+        <td>${_esc(s.type === 'PurchOrd' ? 'PO' : 'VB')}</td>
+        <td><a href="/app/accounting/transactions/transaction.nl?id=${_esc(s.id)}" target="_blank">${_esc(s.tranid)}</a></td>
+        <td>${_esc(s.entity)}</td>
+        <td>${_esc(s.approverName)} <span style="color:#aaa;font-size:11px">(id ${_esc(s.approverId)})</span></td>
+        <td style="color:#888">${_esc(s.datecreated)}</td>
+      </tr>`).join('')}
+      ${stale.length > 10 ? `<tr><td colspan="5" style="text-align:center;color:#888;font-style:italic;padding:8px">… ${stale.length - 10} more</td></tr>` : ''}
+    </tbody>
+  </table>
+</div>` : ''}
 
 <div class="grid">
   <div class="card">
